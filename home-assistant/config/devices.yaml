@@ -1,0 +1,83 @@
+rooms:
+  - id: gaming_room
+    name: Gaming Room
+    icon: gamepad
+    devices:
+      - id: gaming_room_tubelight
+        name: Tubelight
+        type: light
+        entity_id: light.gaming_room_tubelight
+        capabilities:
+          - toggle
+          - brightness
+          - color_temperature
+          - color
+
+  - id: bedroom
+    name: Bedroom
+    icon: bed
+    devices:
+      - id: bedroom_tubelight
+        name: Tubelight
+        type: light
+        entity_id: light.bedroom_tubelight
+        capabilities:
+          - toggle
+          - brightness
+          - color_temperature
+          - color
+
+      - id: bedroom_extension_socket_1
+        name: Extension Socket 1
+        type: switch
+        entity_id: switch.bedroom_extension_socket_1
+        capabilities:
+          - toggle
+
+      - id: bedroom_extension_socket_2
+        name: Extension Socket 2
+        type: switch
+        entity_id: switch.bedroom_extension_socket_2
+        capabilities:
+          - toggle
+
+      - id: bedroom_extension_socket_3
+        name: Extension Socket 3
+        type: switch
+        entity_id: switch.bedroom_extension_socket_3
+        capabilities:
+          - toggle
+
+      - id: bedroom_extension_socket_4
+        name: Extension Socket 4
+        type: switch
+        entity_id: switch.bedroom_extension_socket_4
+        capabilities:
+          - toggle
+
+      - id: bedroom_aircon_socket_1
+        name: Aircon Socket
+        type: switch
+        entity_id: switch.bedroom_aircon_socket_1
+        capabilities:
+          - toggle
+
+scenes:
+  - id: all_lights_off
+    name: All Lights Off
+    actions:
+      - service: light.turn_off
+        target:
+          entity_id: all
+
+  - id: bedroom_power_off
+    name: Bedroom Power Off
+    actions:
+      - service: switch.turn_off
+        target:
+          entity_id:
+            - switch.bedroom_extension_socket_1
+            - switch.bedroom_extension_socket_2
+            - switch.bedroom_extension_socket_3
+            - switch.bedroom_extension_socket_4
+            - switch.bedroom_aircon_socket_1

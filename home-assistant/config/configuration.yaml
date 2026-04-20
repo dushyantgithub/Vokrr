@@ -1,0 +1,19 @@
+default_config:
+
+homeassistant:
+  name: Quantum Home
+  unit_system: metric
+  time_zone: Europe/London
+  country: GB
+
+logger:
+  default: warning
+  logs:
+    homeassistant.components.rest: info
+
+api:
+
+history:
+
+logbook:
+

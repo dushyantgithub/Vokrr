@@ -1,0 +1,58 @@
+from dataclasses import dataclass
+
+from app.core.config import Settings, get_settings
+from app.services.device_service import DeviceService
+from app.services.home_assistant import HomeAssistantClient
+from app.services.intent import IntentService
+from app.services.registry import DeviceRegistry
+from app.services.scene_service import SceneService
+from app.services.state_sync import StateSyncService
+from app.services.websocket_manager import WebSocketManager
+
+
+@dataclass
+class AppState:
+    settings: Settings
+    ha_client: HomeAssistantClient
+    registry: DeviceRegistry
+    websocket_manager: WebSocketManager
+    device_service: DeviceService
+    scene_service: SceneService
+    intent_service: IntentService
+    state_sync: StateSyncService
+
+
+_state: AppState | None = None
+
+
+def build_app_state() -> AppState:
+    settings = get_settings()
+    ha_client = HomeAssistantClient(str(settings.home_assistant_url), settings.home_assistant_token)
+    registry = DeviceRegistry(settings.device_config_path)
+    registry.load()
+    websocket_manager = WebSocketManager()
+    device_service = DeviceService(registry, ha_client)
+    scene_service = SceneService(registry, ha_client)
+    intent_service = IntentService(device_service)
+    state_sync = StateSyncService(ha_client, registry, websocket_manager)
+    return AppState(
+        settings=settings,
+        ha_client=ha_client,
+        registry=registry,
+        websocket_manager=websocket_manager,
+        device_service=device_service,
+        scene_service=scene_service,
+        intent_service=intent_service,
+        state_sync=state_sync,
+    )
+
+
+def set_app_state(state: AppState) -> None:
+    global _state
+    _state = state
+
+
+def get_app_state() -> AppState:
+    if _state is None:
+        raise RuntimeError("Application state has not been initialized")
+    return _state

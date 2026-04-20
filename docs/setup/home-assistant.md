@@ -1,0 +1,56 @@
+# Home Assistant Setup
+
+Quantum Home uses Home Assistant only as the integration and device engine. The custom UI and voice stack talk to the local backend, and the backend talks to Home Assistant APIs.
+
+## First Start
+
+```bash
+docker compose -f infra/docker-compose.yml up -d homeassistant
+```
+
+Open `http://quantum-home.local:8123`, create the initial admin account, then add device integrations from the Home Assistant UI.
+
+## Long-Lived Access Token
+
+1. In Home Assistant, open your user profile.
+2. Create a long-lived access token.
+3. Put the token in `infra/env/backend.env`:
+
+```bash
+HOME_ASSISTANT_TOKEN=your-token
+HOME_ASSISTANT_URL=http://localhost:8123
+```
+
+The Compose stack runs Home Assistant and the backend with host networking so LAN discovery works and the backend reaches Home Assistant through `localhost:8123`.
+
+## Quantum Home App Login
+
+Home Assistant accounts are not used as normal Quantum Home app accounts. Set local app credentials in `.env`:
+
+```bash
+APP_USERNAME=admin
+APP_PASSWORD=replace-this
+APP_AUTH_SECRET=replace-with-a-long-random-string
+```
+
+Touchscreen, web, and future iOS clients call `POST /api/auth/login`, then use the returned token for protected room/device APIs and WebSocket state updates.
+
+## Entity Discovery
+
+After the backend is running:
+
+```bash
+curl http://quantum-home.local:8080/api/ha/entities
+```
+
+Copy entity IDs into `home-assistant/config/devices.yaml`. Keep Quantum Home device IDs stable even if the Home Assistant entity ID changes later.
+
+## API Checks
+
+```bash
+curl -H "Authorization: Bearer $HOME_ASSISTANT_TOKEN" \
+  http://quantum-home.local:8123/api/
+
+curl -H "Authorization: Bearer $HOME_ASSISTANT_TOKEN" \
+  http://quantum-home.local:8123/api/states
+```

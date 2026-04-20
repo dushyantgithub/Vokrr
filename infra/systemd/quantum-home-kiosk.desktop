@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Quantum Home Kiosk
+Comment=Launch Quantum Home as a fullscreen local app
+Exec=/home/quantum-hive/Projects/quantum-home/scripts/start_kiosk.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
+

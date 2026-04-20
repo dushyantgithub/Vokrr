@@ -1,0 +1,69 @@
+name: quantum-home
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: quantum-home-ha
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    env_file:
+      - ../.env
+    environment:
+      TZ: ${TZ:-Europe/London}
+    volumes:
+      - ../home-assistant/config:/config
+
+  backend:
+    build:
+      context: ../backend
+    container_name: quantum-home-backend
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ../.env
+    environment:
+      DEVICE_CONFIG_PATH: /app/config/devices.yaml
+    volumes:
+      - ../home-assistant/config/devices.yaml:/app/config/devices.yaml:ro
+    depends_on:
+      - homeassistant
+
+  frontend:
+    build:
+      context: ../frontend
+    container_name: quantum-home-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  voice-intent:
+    build:
+      context: ../voice-pipeline/intent
+    container_name: quantum-home-voice-intent
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ../.env
+    depends_on:
+      - backend
+
+  voice-listener:
+    build:
+      context: ../voice-pipeline/listener
+    container_name: quantum-home-voice-listener
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    env_file:
+      - ../.env
+    environment:
+      VOSK_MODEL_PATH: /models/vosk
+    volumes:
+      - ../voice-pipeline/models:/models:ro
+    devices:
+      - /dev/snd:/dev/snd
+    depends_on:
+      - backend
