@@ -1,49 +1,110 @@
+import logging
 import re
+from dataclasses import dataclass
+from pathlib import Path
 
-from app.domain.models import DeviceSetRequest, VoiceCommandResponse
-from app.services.device_service import DeviceService
+import yaml
+
+from app.domain.models import Capability, Device, DeviceSetRequest, VoiceCommandResponse
+from app.services.device_service import DeviceService, UnsupportedCapabilityError
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CommandMatch:
+    action: str
+    target: str
+    percent: int | None = None
+
+
+class CommandCatalog:
+    def __init__(self, config_path: str) -> None:
+        self.config_path = Path(config_path)
+        self.patterns: list[tuple[str, str, re.Pattern[str]]] = []
+        self.load()
+
+    def load(self) -> None:
+        raw = yaml.safe_load(self.config_path.read_text()) if self.config_path.exists() else {}
+        patterns: list[tuple[str, str, re.Pattern[str]]] = []
+        for intent in (raw or {}).get("intents", {}).values():
+            action = intent["action"]
+            for template in intent.get("templates", []):
+                patterns.append((action, template, compile_template(template)))
+        self.patterns = patterns
+
+    def match(self, normalized: str) -> CommandMatch | None:
+        for action, _template, pattern in self.patterns:
+            match = pattern.fullmatch(normalized)
+            if not match:
+                continue
+            target = normalize_text(match.groupdict().get("target", ""))
+            percent_text = match.groupdict().get("percent")
+            percent = clamp_percent(int(percent_text)) if percent_text is not None else None
+            return CommandMatch(action=action, target=target, percent=percent)
+        return None
+
+    def commands(self) -> list[dict[str, str]]:
+        commands: list[dict[str, str]] = []
+        for action, template, _pattern in self.patterns:
+            commands.append({"action": action, "template": template})
+        return commands
 
 
 class IntentService:
-    def __init__(self, device_service: DeviceService) -> None:
+    def __init__(self, device_service: DeviceService, command_catalog: CommandCatalog) -> None:
         self.device_service = device_service
+        self.command_catalog = command_catalog
 
     async def handle(self, text: str) -> VoiceCommandResponse:
-        normalized = re.sub(r"\s+", " ", text.lower().strip())
+        normalized = clean_user_utterance(text)
+        logger.info("voice.intent: raw=%r normalized=%r", text, normalized)
         if not normalized:
             return VoiceCommandResponse(understood=False, message="I did not hear a command.")
 
-        target_devices = self._match_devices(normalized)
-        if not target_devices:
+        command = self.command_catalog.match(normalized) or self._fallback_match(normalized)
+        if not command:
+            logger.info("voice.intent: no template or fallback matched normalized=%r", normalized)
             return VoiceCommandResponse(
                 understood=False,
-                message="I could not match that command to a configured device.",
+                message="I did not understand that command.",
             )
 
-        percent = self._extract_percent(normalized)
-        turn_on = any(token in normalized for token in ("turn on", "switch on", "set on"))
-        turn_off = any(token in normalized for token in ("turn off", "switch off", "set off"))
+        logger.info(
+            "voice.intent: matched action=%s target=%r percent=%s",
+            command.action,
+            command.target,
+            command.percent,
+        )
+        target_devices = self._match_target(command.target)
+        if not target_devices:
+            logger.info(
+                "voice.intent: target %r did not resolve to any device", command.target
+            )
+            return VoiceCommandResponse(
+                understood=False,
+                message=f"I could not find {command.target}.",
+            )
+        logger.info(
+            "voice.intent: resolved target=%r -> %s",
+            command.target,
+            [device.id for device in target_devices],
+        )
 
         changed: list[str] = []
+        errors: list[str] = []
         for device in target_devices:
-            if percent is not None:
-                payload = (
-                    DeviceSetRequest(brightness=percent)
-                    if device.type.value == "light"
-                    else DeviceSetRequest(percentage=percent)
-                )
-                await self.device_service.set_device(
-                    device.id,
-                    payload,
-                )
-            elif turn_on or turn_off:
-                await self.device_service.set_device(
-                    device.id,
-                    DeviceSetRequest(state=turn_on and not turn_off),
-                )
-            else:
-                await self.device_service.toggle(device.id)
-            changed.append(device.id)
+            try:
+                await self._apply(device, command)
+                changed.append(device.id)
+            except UnsupportedCapabilityError as exc:
+                errors.append(str(exc))
+
+        if not changed:
+            return VoiceCommandResponse(
+                understood=False,
+                message=errors[0] if errors else "I could not update that device.",
+            )
 
         return VoiceCommandResponse(
             understood=True,
@@ -51,25 +112,145 @@ class IntentService:
             matched_device_ids=changed,
         )
 
-    def _match_devices(self, normalized: str):
+    async def _apply(self, device: Device, command: CommandMatch) -> None:
+        if command.action == "turn_on":
+            await self.device_service.set_device(device.id, DeviceSetRequest(state=True))
+        elif command.action == "turn_off":
+            await self.device_service.set_device(device.id, DeviceSetRequest(state=False))
+        elif command.action == "toggle":
+            await self.device_service.toggle(device.id)
+        elif command.action == "set_level":
+            percent = command.percent if command.percent is not None else 100
+            payload = (
+                DeviceSetRequest(brightness=percent)
+                if device.type.value == "light"
+                else DeviceSetRequest(percentage=percent)
+            )
+            await self.device_service.set_device(device.id, payload)
+        elif command.action == "warm":
+            await self.device_service.set_device(device.id, DeviceSetRequest(rgb_color=[255, 180, 90]))
+        elif command.action == "white":
+            await self.device_service.set_device(device.id, DeviceSetRequest(rgb_color=[255, 255, 255]))
+        elif command.action == "cool":
+            await self.device_service.set_device(device.id, DeviceSetRequest(rgb_color=[80, 150, 255]))
+        else:
+            raise UnsupportedCapabilityError(f"Unsupported command action {command.action}")
+
+    def _match_target(self, target: str) -> list[Device]:
         devices = self.device_service.devices()
+        rooms = self.device_service.rooms()
+        target = normalize_text(target)
+
+        if target in {"all", "everything", "home"}:
+            return [device for device in devices if Capability.toggle in device.capabilities]
+
         room_matches = [
-            room.id for room in self.device_service.rooms() if room.name.lower() in normalized
+            room
+            for room in rooms
+            if _literal_match(target, normalize_text(room.name)) or room.id == slugify(target)
         ]
-        type_matches = [device for device in devices if device.type.value in normalized]
-        name_matches = [device for device in devices if device.name.lower() in normalized]
-
-        candidates = name_matches or type_matches or devices
         if room_matches:
-            candidates = [device for device in candidates if device.room_id in room_matches]
+            room_ids = {room.id for room in room_matches}
+            return [
+                device
+                for device in devices
+                if device.room_id in room_ids and Capability.toggle in device.capabilities
+            ]
 
-        if "all" not in normalized and len(candidates) > 1 and not name_matches:
-            return []
-        return candidates
+        exact_matches = [
+            device
+            for device in devices
+            if _literal_match(target, normalize_text(device.name))
+            or _literal_match(target, normalize_text(f"{device.room_name} {device.name}"))
+            or _literal_match(target, normalize_text(device.id.replace("_", " ")))
+            or _literal_match(
+                target, normalize_text(device.entity_id.replace(".", " ").replace("_", " "))
+            )
+        ]
+        if exact_matches:
+            return exact_matches
+
+        target_folded = _space_fold(target)
+        contains_matches = [
+            device
+            for device in devices
+            if target in normalize_text(f"{device.room_name} {device.name}")
+            or target in normalize_text(device.id.replace("_", " "))
+            or target_folded
+            in _space_fold(normalize_text(f"{device.room_name} {device.name}"))
+            or target_folded in _space_fold(normalize_text(device.id.replace("_", " ")))
+        ]
+        return contains_matches if len(contains_matches) == 1 else []
 
     @staticmethod
-    def _extract_percent(normalized: str) -> int | None:
-        match = re.search(r"(\d{1,3})\s*(percent|%)", normalized)
-        if not match:
-            return None
-        return max(0, min(100, int(match.group(1))))
+    def _fallback_match(normalized: str) -> CommandMatch | None:
+        percent = extract_percent(normalized)
+        if percent is not None:
+            target = re.sub(r"\b\d{1,3}\s*(percent|%)\b", "", normalized).strip()
+            target = target.removeprefix("set ").removeprefix("dim ").strip()
+            return CommandMatch(action="set_level", target=target, percent=percent)
+
+        for phrase, action in [
+            ("turn on ", "turn_on"),
+            ("switch on ", "turn_on"),
+            ("turn off ", "turn_off"),
+            ("switch off ", "turn_off"),
+            ("toggle ", "toggle"),
+        ]:
+            if normalized.startswith(phrase):
+                return CommandMatch(action=action, target=normalized.removeprefix(phrase).strip())
+        return None
+
+
+def compile_template(template: str) -> re.Pattern[str]:
+    escaped = re.escape(normalize_text(template))
+    escaped = escaped.replace(r"\{target\}", r"(?P<target>.+?)")
+    escaped = escaped.replace(r"\{percent\}", r"(?P<percent>\d{1,3})")
+    escaped = escaped.replace(r"%", r"\s*(?:percent|%)")
+    return re.compile(escaped)
+
+
+_FILLER_PREFIX_PATTERN = re.compile(
+    r"^(?:"
+    r"(?:hey|ok|okay|hi|hello|please|could you|can you|would you|"
+    r"jarvis|hive|quantum(?: home)?)"
+    r"[,\s]+)+"
+)
+
+
+def normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.lower().strip())
+
+
+def clean_user_utterance(value: str) -> str:
+    """Normalize a spoken utterance: lower, drop punctuation, strip filler prefixes."""
+    lowered = value.lower()
+    lowered = re.sub(r"[^a-z0-9%\s]", " ", lowered)
+    collapsed = re.sub(r"\s+", " ", lowered).strip()
+    return _FILLER_PREFIX_PATTERN.sub("", collapsed)
+
+
+def _space_fold(normalized: str) -> str:
+    """Strip all spaces so e.g. STT 'tube light' matches registry name 'Tubelight'."""
+    return "".join(normalized.split())
+
+
+def _literal_match(target_normalized: str, candidate_normalized: str) -> bool:
+    if target_normalized == candidate_normalized:
+        return True
+    return _space_fold(target_normalized) == _space_fold(candidate_normalized)
+
+
+def slugify(value: str) -> str:
+    return normalize_text(value).replace(" ", "_")
+
+
+def extract_percent(normalized: str) -> int | None:
+    match = re.search(r"(\d{1,3})\s*(percent|%)", normalized)
+    if not match:
+        return None
+    return clamp_percent(int(match.group(1)))
+
+
+def clamp_percent(percent: int) -> int:
+    return max(0, min(100, percent))

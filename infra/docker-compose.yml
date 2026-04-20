@@ -8,7 +8,7 @@ services:
     privileged: true
     network_mode: host
     env_file:
-      - ../.env
+      - ../scripts/.env
     environment:
       TZ: ${TZ:-Europe/London}
     volumes:
@@ -21,11 +21,13 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file:
-      - ../.env
+      - ../scripts/.env
     environment:
       DEVICE_CONFIG_PATH: /app/config/devices.yaml
+      COMMAND_CONFIG_PATH: /app/config/commands.yaml
     volumes:
       - ../home-assistant/config/devices.yaml:/app/config/devices.yaml:ro
+      - ../home-assistant/config/commands.yaml:/app/config/commands.yaml:ro
     depends_on:
       - homeassistant
 
@@ -46,7 +48,7 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file:
-      - ../.env
+      - ../scripts/.env
     depends_on:
       - backend
 
@@ -58,11 +60,11 @@ services:
     network_mode: host
     privileged: true
     env_file:
-      - ../.env
+      - ../scripts/.env
     environment:
-      VOSK_MODEL_PATH: /models/vosk
+      PORCUPINE_KEYWORD_PATH: /wake-word/Jarvis_en_raspberry-pi_v4_0_0.ppn
     volumes:
-      - ../voice-pipeline/models:/models:ro
+      - ../wake-word:/wake-word:ro
     devices:
       - /dev/snd:/dev/snd
     depends_on:

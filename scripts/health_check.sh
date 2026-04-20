@@ -4,7 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-if [[ -f .env ]]; then
+if [[ -f scripts/.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source scripts/.env
+  set +a
+elif [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
   source .env
@@ -64,4 +69,3 @@ SCENE_COUNT="$(
 echo "[ OK ] authenticated rooms: ${ROOM_COUNT}"
 echo "[ OK ] authenticated scenes: ${SCENE_COUNT}"
 echo "Health check passed."
-

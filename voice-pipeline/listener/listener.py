@@ -1,4 +1,4 @@
-import json
+import logging
 import os
 import queue
 import random
@@ -7,18 +7,27 @@ import time
 from pathlib import Path
 
 import httpx
+import numpy as np
 from fastapi import FastAPI
 
 BACKEND_URL = os.getenv("VOICE_BACKEND_URL", "http://localhost:8080").rstrip("/")
 APP_USERNAME = os.getenv("APP_USERNAME", "admin")
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
-WAKE_WORD = os.getenv("VOICE_WAKE_WORD", "quantum").lower()
-WAKE_WORD_DISPLAY = os.getenv("VOICE_WAKE_WORD", "quantum")
-MODEL_PATH = Path(os.getenv("VOSK_MODEL_PATH", "/models/vosk"))
+WAKE_WORD_DISPLAY = os.getenv("VOICE_WAKE_WORD", "Jarvis")
+PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_API_KEY") or os.getenv("PORCUPINE_ACCESS_KEY", "")
+PORCUPINE_KEYWORD_PATH = Path(
+    os.getenv("PORCUPINE_KEYWORD_PATH", "/wake-word/Jarvis_en_raspberry-pi_v4_0_0.ppn")
+)
 LISTENER_ENABLED = os.getenv("VOICE_LISTENER_ENABLED", "1") == "1"
-SAMPLE_RATE = int(os.getenv("VOICE_SAMPLE_RATE", "16000"))
 INPUT_DEVICE = os.getenv("VOICE_INPUT_DEVICE") or None
-COMMAND_WINDOW_SECONDS = int(os.getenv("VOICE_COMMAND_WINDOW_SECONDS", "30"))
+COMMAND_RECORD_SECONDS = float(os.getenv("VOICE_COMMAND_RECORD_SECONDS", "6"))
+COMMAND_MIN_SECONDS = float(os.getenv("VOICE_COMMAND_MIN_SECONDS", "1.2"))
+COMMAND_SILENCE_SECONDS = float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "1.1"))
+COMMAND_SILENCE_RMS = int(os.getenv("VOICE_COMMAND_SILENCE_RMS", "450"))
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base.en")
+WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "en")
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
+WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 ASSIST_PROMPTS = [
     "How can I help, sir?",
     "Listening, sir.",
@@ -27,6 +36,7 @@ ASSIST_PROMPTS = [
 ]
 
 app = FastAPI(title="Quantum Home Voice Listener", version="0.1.0")
+logger = logging.getLogger(__name__)
 
 audio_queue: queue.Queue[bytes] = queue.Queue()
 status = {
@@ -34,9 +44,13 @@ status = {
     "state": "starting",
     "message": "Voice listener starting",
     "wake_word": WAKE_WORD_DISPLAY,
-    "model_path": str(MODEL_PATH),
+    "wake_engine": "porcupine",
+    "stt_engine": "faster-whisper",
+    "keyword_path": str(PORCUPINE_KEYWORD_PATH),
+    "whisper_model": WHISPER_MODEL_NAME,
 }
 token_cache = {"token": None, "time": 0.0}
+whisper_cache = {"model": None}
 
 
 @app.on_event("startup")
@@ -55,37 +69,45 @@ async def health() -> dict:
 
 def run_listener() -> None:
     try:
+        import pvporcupine
         import sounddevice as sd
-        from vosk import KaldiRecognizer, Model
     except Exception as exc:
         status.update(ok=False, state="dependency_error", message=str(exc))
         return
 
-    if not MODEL_PATH.exists():
+    if not PORCUPINE_ACCESS_KEY:
         status.update(
             ok=False,
-            state="model_missing",
-            message=f"Vosk model missing at {MODEL_PATH}. Download a model before enabling voice.",
+            state="porcupine_config_error",
+            message="PORCUPINE_API_KEY is required for wake-word detection.",
         )
         return
 
-    try:
-        sample_rate = select_sample_rate(sd)
-    except Exception as exc:
-        status.update(ok=False, state="audio_error", message=str(exc))
-        post_voice_event("error", status["message"])
+    if not PORCUPINE_KEYWORD_PATH.exists():
+        status.update(
+            ok=False,
+            state="wake_word_missing",
+            message=f"Porcupine wake-word file missing at {PORCUPINE_KEYWORD_PATH}.",
+        )
         return
 
+    porcupine = None
     try:
-        model = Model(str(MODEL_PATH))
-        recognizer = KaldiRecognizer(model, sample_rate)
-        recognizer.SetWords(False)
+        porcupine = pvporcupine.create(
+            access_key=PORCUPINE_ACCESS_KEY,
+            keyword_paths=[str(PORCUPINE_KEYWORD_PATH)],
+        )
+        sample_rate = porcupine.sample_rate
+        frame_length = porcupine.frame_length
+        input_sample_rate = select_input_sample_rate(sd, sample_rate)
+        input_blocksize = max(1, round(frame_length * input_sample_rate / sample_rate))
+        load_whisper_model()
     except Exception as exc:
-        status.update(ok=False, state="model_error", message=str(exc))
+        status.update(ok=False, state="startup_error", message=str(exc))
         return
 
     def callback(indata, frames, time_info, error) -> None:
-        if error:
+        if error and "overflow" not in str(error).lower():
             status.update(ok=False, state="audio_error", message=str(error))
         audio_queue.put(bytes(indata))
 
@@ -94,61 +116,63 @@ def run_listener() -> None:
         state="idle",
         message=f"Listening for {WAKE_WORD_DISPLAY}",
         sample_rate=sample_rate,
+        input_sample_rate=input_sample_rate,
+        frame_length=frame_length,
         input_device=INPUT_DEVICE or "default",
     )
     post_voice_event("idle", status["message"])
 
-    waiting_for_command_until = 0.0
+    pending_audio = np.array([], dtype=np.int16)
+
+    def next_porcupine_frame() -> np.ndarray:
+        nonlocal pending_audio
+        while len(pending_audio) < frame_length:
+            chunk = resample_pcm(pcm_from_bytes(audio_queue.get()), input_sample_rate, sample_rate)
+            pending_audio = np.concatenate([pending_audio, chunk])
+        frame = pending_audio[:frame_length]
+        pending_audio = pending_audio[frame_length:]
+        return frame
+
     try:
         with sd.RawInputStream(
-            samplerate=sample_rate,
-            blocksize=8000,
+            samplerate=input_sample_rate,
+            blocksize=input_blocksize,
             dtype="int16",
             channels=1,
             device=INPUT_DEVICE,
             callback=callback,
         ):
             while True:
-                data = audio_queue.get()
-                if waiting_for_command_until and time.time() > waiting_for_command_until:
-                    waiting_for_command_until = 0.0
-                    status.update(ok=True, state="idle", message=f"Listening for {WAKE_WORD_DISPLAY}")
-                    post_voice_event("idle", status["message"])
-                    recognizer.Reset()
-                    continue
-                if not recognizer.AcceptWaveform(data):
-                    continue
-                result = json.loads(recognizer.Result())
-                text = result.get("text", "").strip().lower()
-                if not text:
+                pcm = next_porcupine_frame()
+
+                result = porcupine.process(pcm)
+                if result < 0:
                     continue
 
-                if waiting_for_command_until:
+                prompt = random.choice(ASSIST_PROMPTS)
+                status.update(ok=True, state="listening", message=prompt, last_wake=time.time())
+                post_voice_event("listening", prompt)
+                command_audio = record_command(next_porcupine_frame, sample_rate)
+                text = transcribe_audio(command_audio, sample_rate)
+                status.update(last_text=text)
+
+                if text:
                     submit_command(text)
-                    waiting_for_command_until = 0.0
-                    recognizer.Reset()
-                    continue
-
-                if WAKE_WORD in text:
-                    command = text.split(WAKE_WORD, 1)[1].strip(" ,")
-                    prompt = random.choice(ASSIST_PROMPTS)
-                    status.update(ok=True, state="listening", message=prompt)
-                    post_voice_event("listening", prompt)
-                    if command:
-                        submit_command(command)
-                        recognizer.Reset()
-                    else:
-                        waiting_for_command_until = time.time() + COMMAND_WINDOW_SECONDS
                 else:
-                    status.update(ok=True, state="idle", message=f"Listening for {WAKE_WORD_DISPLAY}")
+                    status.update(ok=True, state="idle", message="I did not hear a command.")
+                    post_voice_event("error", "I did not hear a command.")
+                    reset_to_idle(delay_seconds=1.5)
     except Exception as exc:
         status.update(ok=False, state="listener_error", message=str(exc))
         post_voice_event("error", status["message"])
+    finally:
+        if porcupine is not None:
+            porcupine.delete()
 
 
-def select_sample_rate(sd) -> int:
+def select_input_sample_rate(sd, target_sample_rate: int) -> int:
     candidate_rates = []
-    for rate in [SAMPLE_RATE, 48000, 44100, 16000, 8000]:
+    for rate in [target_sample_rate, 48000, 44100, 32000, 16000, 8000]:
         if rate not in candidate_rates:
             candidate_rates.append(rate)
 
@@ -166,6 +190,76 @@ def select_sample_rate(sd) -> int:
             errors.append(f"{rate}: {exc}")
 
     raise RuntimeError("No supported microphone sample rate found. " + "; ".join(errors))
+
+
+def resample_pcm(pcm: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+    if source_rate == target_rate or pcm.size == 0:
+        return pcm
+
+    source_positions = np.arange(pcm.size, dtype=np.float32)
+    target_length = max(1, round(pcm.size * target_rate / source_rate))
+    target_positions = np.linspace(0, pcm.size - 1, target_length, dtype=np.float32)
+    resampled = np.interp(target_positions, source_positions, pcm.astype(np.float32))
+    return np.clip(resampled, -32768, 32767).astype(np.int16)
+
+
+def record_command(next_frame, sample_rate: int) -> np.ndarray:
+    frames: list[np.ndarray] = []
+    started_at = time.time()
+    last_voice_at = started_at
+
+    status.update(ok=True, state="recording", message="Listening...")
+    post_voice_event("listening", "Listening...")
+
+    while time.time() - started_at < COMMAND_RECORD_SECONDS:
+        pcm = next_frame()
+
+        frames.append(pcm.copy())
+        rms = float(np.sqrt(np.mean(np.square(pcm.astype(np.float32)))))
+        now = time.time()
+        if rms >= COMMAND_SILENCE_RMS:
+            last_voice_at = now
+        if now - started_at >= COMMAND_MIN_SECONDS and now - last_voice_at >= COMMAND_SILENCE_SECONDS:
+            break
+
+    if not frames:
+        return np.array([], dtype=np.int16)
+    return np.concatenate(frames)
+
+
+def transcribe_audio(audio: np.ndarray, sample_rate: int) -> str:
+    if audio.size == 0:
+        return ""
+
+    status.update(ok=True, state="transcribing", message="Transcribing...")
+    post_voice_event("processing", "Transcribing...")
+    model = load_whisper_model()
+    audio_float = audio.astype(np.float32) / 32768.0
+    segments, _info = model.transcribe(
+        audio_float,
+        language=WHISPER_LANGUAGE,
+        vad_filter=True,
+    )
+    text = " ".join(segment.text.strip() for segment in segments).strip()
+    logger.info("Whisper recognized command: %s", text)
+    return text.lower()
+
+
+def load_whisper_model():
+    if whisper_cache["model"] is None:
+        status.update(ok=True, state="loading_stt", message=f"Loading Whisper {WHISPER_MODEL_NAME}...")
+        from faster_whisper import WhisperModel
+
+        whisper_cache["model"] = WhisperModel(
+            WHISPER_MODEL_NAME,
+            device=WHISPER_DEVICE,
+            compute_type=WHISPER_COMPUTE_TYPE,
+        )
+    return whisper_cache["model"]
+
+
+def pcm_from_bytes(data: bytes) -> np.ndarray:
+    return np.frombuffer(data, dtype=np.int16)
 
 
 def submit_command(text: str) -> None:
@@ -189,6 +283,8 @@ def submit_command(text: str) -> None:
     except Exception as exc:
         status.update(ok=False, state="command_error", message=str(exc))
         post_voice_event("error", "Voice command failed")
+    finally:
+        reset_to_idle(delay_seconds=2)
 
 
 def post_voice_event(event_status: str, message: str) -> None:
@@ -216,3 +312,11 @@ def get_token() -> str:
     token_cache["token"] = response.json()["token"]
     token_cache["time"] = time.time()
     return str(token_cache["token"])
+
+
+def reset_to_idle(delay_seconds: float = 0) -> None:
+    if delay_seconds:
+        time.sleep(delay_seconds)
+    message = f"Listening for {WAKE_WORD_DISPLAY}"
+    status.update(ok=True, state="idle", message=message)
+    post_voice_event("idle", message)

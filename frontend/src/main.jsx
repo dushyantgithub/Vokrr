@@ -3,11 +3,12 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 const API_BASE =
-  window.location.port === "3000"
+  window.location.port === "3000" || window.location.port === "5173"
     ? `${window.location.protocol}//${window.location.hostname}:8080`
     : "";
 const TOKEN_KEY = "quantum_home_token";
 const KIOSK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const NAV_ITEMS = ["Home", "Devices", "Routines", "Activity"];
 
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
@@ -15,8 +16,10 @@ function App() {
   const [scenes, setScenes] = useState([]);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
   const [health, setHealth] = useState(null);
-  const [assistantMessage, setAssistantMessage] = useState("Voice ready");
-  const [assistantDisplay, setAssistantDisplay] = useState("Voice ready");
+  const [healthError, setHealthError] = useState("");
+  const [activeView, setActiveView] = useState("Home");
+  const [assistantMessage, setAssistantMessage] = useState("Listening for Jarvis");
+  const [assistantDisplay, setAssistantDisplay] = useState("Listening for Jarvis");
   const [assistantStatus, setAssistantStatus] = useState("idle");
   const [loginError, setLoginError] = useState("");
   const [appMessage, setAppMessage] = useState("");
@@ -28,6 +31,8 @@ function App() {
     }
     loadSnapshot();
     loadHealth();
+    const timer = window.setInterval(loadHealth, 5000);
+    return () => window.clearInterval(timer);
   }, [token]);
 
   useEffect(() => {
@@ -106,23 +111,39 @@ function App() {
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0],
     [rooms, selectedRoomId],
   );
+  const allDevices = useMemo(() => rooms.flatMap((room) => room.devices), [rooms]);
 
   async function loadSnapshot() {
-    const response = await authFetch("/api/rooms");
-    if (response.ok) {
-      const data = await response.json();
-      setRooms(data);
-      setSelectedRoomId((current) => current ?? data?.[0]?.id ?? null);
-    }
-    const scenesResponse = await authFetch("/api/scenes");
-    if (scenesResponse.ok) {
-      setScenes(await scenesResponse.json());
+    try {
+      const response = await authFetch("/api/rooms");
+      if (response.ok) {
+        const data = await response.json();
+        setRooms(data);
+        setSelectedRoomId((current) => current ?? data?.[0]?.id ?? null);
+      } else if (response.status !== 401) {
+        await showApiError(response, "Could not load configured rooms");
+      }
+      const scenesResponse = await authFetch("/api/scenes");
+      if (scenesResponse.ok) {
+        setScenes(await scenesResponse.json());
+      }
+    } catch {
+      setAppMessage("Backend unavailable. Retrying when the service is back.");
     }
   }
 
   async function loadHealth() {
-    const response = await fetch(`${API_BASE}/api/system/health`);
-    setHealth(await response.json());
+    try {
+      const response = await fetch(`${API_BASE}/api/system/health`);
+      if (!response.ok) {
+        throw new Error(`Backend health returned HTTP ${response.status}`);
+      }
+      setHealth(await response.json());
+      setHealthError("");
+    } catch (error) {
+      setHealth(null);
+      setHealthError(error instanceof Error ? error.message : "Backend unavailable");
+    }
   }
 
   function mergeDevice(updatedDevice) {
@@ -138,7 +159,7 @@ function App() {
 
   function setAssistantFeedback(message, status = "idle") {
     setAssistantStatus(status || "idle");
-    setAssistantMessage(message || "Voice ready");
+    setAssistantMessage(message || "Listening for Jarvis");
   }
 
   async function toggleDevice(device) {
@@ -238,6 +259,10 @@ function App() {
     setSelectedRoomId(null);
   }
 
+  function refreshApp() {
+    window.location.reload();
+  }
+
   if (!token) {
     if (kioskLoginPending) {
       return (
@@ -255,50 +280,61 @@ function App() {
 
   return (
     <main className="shell">
-      <aside className="rooms">
-        <div>
-          <p className="eyebrow">Quantum Home</p>
-          <h1>Control</h1>
-        </div>
-        <nav className="roomList" aria-label="Rooms">
-          {rooms.map((room) => (
-            <button
-              className={room.id === selectedRoom?.id ? "roomButton active" : "roomButton"}
-              key={room.id}
-              onClick={() => setSelectedRoomId(room.id)}
-            >
-              <span>{room.name}</span>
-              <small>{room.devices.length}</small>
-            </button>
-          ))}
-        </nav>
-        <SystemStatus health={health} onLogout={logout} />
-      </aside>
-
-      <section className="roomPanel">
-        <header className="topBar">
+      <section className="homeScreen">
+        <header className="heroBar">
           <div>
-            <p className="eyebrow">Room</p>
-            <h2>{selectedRoom?.name ?? "No room configured"}</h2>
+            <p className="eyebrow">Quantum Home</p>
+            <h1>Good evening, sir</h1>
           </div>
-          <div className={`voiceStatus ${appMessage ? "warnText" : ""} ${assistantStatus}`}>
-            <span>{appMessage || assistantDisplay || "Voice ready"}</span>
-            {!appMessage && <i aria-hidden="true" />}
-          </div>
+          <SystemStatus health={health} error={healthError} onRefresh={refreshApp} onLogout={logout} />
         </header>
 
         <SceneStrip scenes={scenes} onRun={runScene} />
 
-        <div className="deviceGrid">
-          {selectedRoom?.devices.map((device) => (
-            <DeviceCard
-              device={device}
-              key={device.id}
-              onToggle={() => toggleDevice(device)}
-              onSet={(payload) => setDevice(device, payload)}
-            />
+        <section className="contentGrid">
+          <PrimaryView
+            activeView={activeView}
+            rooms={rooms}
+            selectedRoom={selectedRoom}
+            scenes={scenes}
+            allDevices={allDevices}
+            onSelectRoom={setSelectedRoomId}
+            onToggle={toggleDevice}
+            onSet={setDevice}
+            onRunScene={runScene}
+            health={health}
+            healthError={healthError}
+          />
+
+          <aside className={`assistantPanel ${assistantStatus}`}>
+            <p className="eyebrow">Jarvis</p>
+            <div className="assistantOrb">
+              <span />
+            </div>
+            <h2>{assistantStatus === "listening" ? "Listening" : "Assistant"}</h2>
+            <p className={appMessage ? "assistantText warnText" : "assistantText"}>
+              {appMessage || assistantDisplay || "Listening for Jarvis"}
+              {!appMessage && <i aria-hidden="true" />}
+            </p>
+            <div className="assistantHints">
+              <span>Say “Jarvis”</span>
+              <span>Try “turn off bedroom”</span>
+            </div>
+          </aside>
+        </section>
+
+        <nav className="bottomNav" aria-label="Primary">
+          {NAV_ITEMS.map((item) => (
+            <button
+              className={activeView === item ? "active" : ""}
+              key={item}
+              onClick={() => setActiveView(item)}
+              type="button"
+            >
+              {item}
+            </button>
           ))}
-        </div>
+        </nav>
       </section>
     </main>
   );
@@ -317,6 +353,115 @@ function SceneStrip({ scenes, onRun }) {
         </button>
       ))}
     </section>
+  );
+}
+
+function PrimaryView({
+  activeView,
+  rooms,
+  selectedRoom,
+  scenes,
+  allDevices,
+  onSelectRoom,
+  onToggle,
+  onSet,
+  onRunScene,
+  health,
+  healthError,
+}) {
+  if (activeView === "Devices") {
+    return (
+      <div className="deviceColumn">
+        <div className="sectionTitle">
+          <div>
+            <p className="eyebrow">All Devices</p>
+            <h2>{allDevices.length ? `${allDevices.length} configured` : "No devices loaded"}</h2>
+          </div>
+        </div>
+        <DeviceGrid devices={allDevices} onToggle={onToggle} onSet={onSet} />
+      </div>
+    );
+  }
+
+  if (activeView === "Routines") {
+    return (
+      <div className="deviceColumn">
+        <div className="sectionTitle">
+          <div>
+            <p className="eyebrow">Routines</p>
+            <h2>{scenes.length ? "Ready" : "No routines configured"}</h2>
+          </div>
+        </div>
+        <div className="routineGrid">
+          {scenes.map((scene) => (
+            <button className="routineCard" key={scene.id} onClick={() => onRunScene(scene)}>
+              {scene.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (activeView === "Activity") {
+    const haOk = health?.home_assistant?.ok;
+    const detail = healthError || health?.home_assistant?.error || "No recent errors.";
+    return (
+      <div className="deviceColumn">
+        <div className="sectionTitle">
+          <div>
+            <p className="eyebrow">Activity</p>
+            <h2>{haOk ? "Systems online" : "System needs attention"}</h2>
+          </div>
+        </div>
+        <div className="activityPanel">
+          <p>Rooms loaded: {rooms.length}</p>
+          <p>Devices loaded: {allDevices.length}</p>
+          <p>Home Assistant: {haOk ? "online" : "offline"}</p>
+          {!haOk && <p className="warnText">{detail}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="deviceColumn">
+      <div className="sectionTitle">
+        <div>
+          <p className="eyebrow">Devices</p>
+          <h2>{selectedRoom?.name ?? (rooms.length ? "Select a room" : "Rooms are loading")}</h2>
+        </div>
+      </div>
+
+      <nav className="roomTabs" aria-label="Rooms">
+        {rooms.map((room) => (
+          <button
+            className={room.id === selectedRoom?.id ? "roomButton active" : "roomButton"}
+            key={room.id}
+            onClick={() => onSelectRoom(room.id)}
+          >
+            {room.name}
+          </button>
+        ))}
+      </nav>
+
+      <DeviceGrid devices={selectedRoom?.devices ?? []} onToggle={onToggle} onSet={onSet} />
+    </div>
+  );
+}
+
+function DeviceGrid({ devices, onToggle, onSet }) {
+  return (
+    <div className="deviceGrid">
+      {devices.map((device) => (
+        <DeviceCard
+          device={device}
+          key={device.id}
+          onToggle={() => onToggle(device)}
+          onSet={(payload) => onSet(device, payload)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -341,16 +486,24 @@ function LoginScreen({ error, onLogin }) {
   );
 }
 
-function SystemStatus({ health, onLogout }) {
+function SystemStatus({ health, error, onRefresh, onLogout }) {
   const haOk = health?.home_assistant?.ok;
+  const label = error
+    ? "Backend offline"
+    : health
+      ? haOk
+        ? "Home Assistant online"
+        : "Home Assistant offline"
+      : "Checking Home Assistant";
   return (
-    <>
+    <div className="systemCluster">
       <div className="status">
-        <span className={haOk ? "dot ok" : "dot warn"} />
-        <span>{haOk ? "Home Assistant online" : "Checking Home Assistant"}</span>
+        <span className={haOk ? "dot ok" : health ? "dot error" : "dot warn"} />
+        <span>{label}</span>
       </div>
+      <button className="refreshButton" onClick={onRefresh} type="button">Refresh</button>
       <button className="logoutButton" onClick={onLogout}>Sign Out</button>
-    </>
+    </div>
   );
 }
 
@@ -366,6 +519,7 @@ function DeviceCard({ device, onToggle, onSet }) {
     <article className={device.state.is_on ? "deviceCard on" : "deviceCard"}>
       <div className="deviceHeader">
         <div>
+          <div className="deviceIcon">{deviceIcon(device.type)}</div>
           <p className="deviceType">{device.type}</p>
           <h3>{device.name}</h3>
         </div>
@@ -451,6 +605,13 @@ function DeviceCard({ device, onToggle, onSet }) {
       </div>
     </article>
   );
+}
+
+function deviceIcon(type) {
+  if (type === "light") return "◐";
+  if (type === "switch") return "▣";
+  if (type === "fan") return "✣";
+  return "•";
 }
 
 createRoot(document.getElementById("root")).render(<App />);

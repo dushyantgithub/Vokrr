@@ -188,6 +188,20 @@ async def voice_event(
     return {"ok": True}
 
 
+@router.get("/api/voice/commands", dependencies=[Depends(require_user)])
+async def voice_commands(state: AppState = Depends(get_app_state)) -> dict:
+    return {
+        "targets": {
+            "rooms": [room.name for room in state.device_service.rooms()],
+            "devices": [
+                f"{device.room_name} {device.name}" for device in state.device_service.devices()
+            ],
+            "global": ["all", "everything", "home"],
+        },
+        "templates": state.command_catalog.commands(),
+    }
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,

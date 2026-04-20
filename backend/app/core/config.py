@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     home_assistant_url: AnyHttpUrl = "http://localhost:8123"
     home_assistant_token: str = ""
     device_config_path: str = "/app/config/devices.yaml"
+    command_config_path: str = "/app/config/commands.yaml"
     app_username: str = "admin"
     app_password: str = "change-this-password"
     app_auth_secret: str = "change-this-random-secret"

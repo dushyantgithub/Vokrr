@@ -1,0 +1,57 @@
+intents:
+  turn_on:
+    action: turn_on
+    templates:
+      - "turn on {target}"
+      - "switch on {target}"
+      - "switch {target} on"
+      - "power on {target}"
+      - "start {target}"
+
+  turn_off:
+    action: turn_off
+    templates:
+      - "turn off {target}"
+      - "switch off {target}"
+      - "switch {target} off"
+      - "power off {target}"
+      - "stop {target}"
+      - "shut down {target}"
+
+  toggle:
+    action: toggle
+    templates:
+      - "toggle {target}"
+      - "change {target}"
+
+  set_level:
+    action: set_level
+    templates:
+      - "set {target} to {percent} percent"
+      - "set {target} to {percent}%"
+      - "dim {target} to {percent} percent"
+      - "make {target} {percent} percent"
+      - "turn {target} to {percent} percent"
+
+  warm:
+    action: warm
+    templates:
+      - "make {target} warm"
+      - "set {target} warm"
+      - "warm {target}"
+
+  white:
+    action: white
+    templates:
+      - "make {target} white"
+      - "set {target} white"
+      - "neutral {target}"
+
+  cool:
+    action: cool
+    templates:
+      - "make {target} cool"
+      - "set {target} cool"
+      - "cool {target}"
+      - "make {target} blue"
+      - "set {target} blue"

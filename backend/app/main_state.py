@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from app.core.config import Settings, get_settings
 from app.services.device_service import DeviceService
 from app.services.home_assistant import HomeAssistantClient
-from app.services.intent import IntentService
+from app.services.intent import CommandCatalog, IntentService
 from app.services.registry import DeviceRegistry
 from app.services.scene_service import SceneService
 from app.services.state_sync import StateSyncService
@@ -18,6 +18,7 @@ class AppState:
     websocket_manager: WebSocketManager
     device_service: DeviceService
     scene_service: SceneService
+    command_catalog: CommandCatalog
     intent_service: IntentService
     state_sync: StateSyncService
 
@@ -33,7 +34,8 @@ def build_app_state() -> AppState:
     websocket_manager = WebSocketManager()
     device_service = DeviceService(registry, ha_client)
     scene_service = SceneService(registry, ha_client)
-    intent_service = IntentService(device_service)
+    command_catalog = CommandCatalog(settings.command_config_path)
+    intent_service = IntentService(device_service, command_catalog)
     state_sync = StateSyncService(ha_client, registry, websocket_manager)
     return AppState(
         settings=settings,
@@ -42,6 +44,7 @@ def build_app_state() -> AppState:
         websocket_manager=websocket_manager,
         device_service=device_service,
         scene_service=scene_service,
+        command_catalog=command_catalog,
         intent_service=intent_service,
         state_sync=state_sync,
     )
