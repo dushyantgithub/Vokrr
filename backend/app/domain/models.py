@@ -94,6 +94,7 @@ class VoiceCommandResponse(BaseModel):
     understood: bool
     message: str
     matched_device_ids: list[str] = Field(default_factory=list)
+    navigate: str | None = None
 
 
 class VoiceEventRequest(BaseModel):

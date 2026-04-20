@@ -55,3 +55,20 @@ intents:
       - "cool {target}"
       - "make {target} blue"
       - "set {target} blue"
+
+  navigate_news:
+    action: navigate
+    view: News
+    templates:
+      - "show me latest news"
+      - "show me the latest news"
+      - "show me the news"
+      - "show me news"
+      - "show latest news"
+      - "show the news"
+      - "show news"
+      - "open news"
+      - "open the news"
+      - "go to news"
+      - "latest news"
+      - "news"

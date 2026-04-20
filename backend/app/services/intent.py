@@ -16,37 +16,39 @@ class CommandMatch:
     action: str
     target: str
     percent: int | None = None
+    view: str | None = None
 
 
 class CommandCatalog:
     def __init__(self, config_path: str) -> None:
         self.config_path = Path(config_path)
-        self.patterns: list[tuple[str, str, re.Pattern[str]]] = []
+        self.patterns: list[tuple[str, str, re.Pattern[str], str | None]] = []
         self.load()
 
     def load(self) -> None:
         raw = yaml.safe_load(self.config_path.read_text()) if self.config_path.exists() else {}
-        patterns: list[tuple[str, str, re.Pattern[str]]] = []
+        patterns: list[tuple[str, str, re.Pattern[str], str | None]] = []
         for intent in (raw or {}).get("intents", {}).values():
             action = intent["action"]
+            view = intent.get("view")
             for template in intent.get("templates", []):
-                patterns.append((action, template, compile_template(template)))
+                patterns.append((action, template, compile_template(template), view))
         self.patterns = patterns
 
     def match(self, normalized: str) -> CommandMatch | None:
-        for action, _template, pattern in self.patterns:
+        for action, _template, pattern, view in self.patterns:
             match = pattern.fullmatch(normalized)
             if not match:
                 continue
-            target = normalize_text(match.groupdict().get("target", ""))
+            target = normalize_text(match.groupdict().get("target", "") or "")
             percent_text = match.groupdict().get("percent")
             percent = clamp_percent(int(percent_text)) if percent_text is not None else None
-            return CommandMatch(action=action, target=target, percent=percent)
+            return CommandMatch(action=action, target=target, percent=percent, view=view)
         return None
 
     def commands(self) -> list[dict[str, str]]:
         commands: list[dict[str, str]] = []
-        for action, template, _pattern in self.patterns:
+        for action, template, _pattern, _view in self.patterns:
             commands.append({"action": action, "template": template})
         return commands
 
@@ -71,11 +73,21 @@ class IntentService:
             )
 
         logger.info(
-            "voice.intent: matched action=%s target=%r percent=%s",
+            "voice.intent: matched action=%s target=%r percent=%s view=%s",
             command.action,
             command.target,
             command.percent,
+            command.view,
         )
+
+        if command.action == "navigate":
+            view = command.view or "Dashboard"
+            return VoiceCommandResponse(
+                understood=True,
+                message=f"Opening {view}.",
+                navigate=view,
+            )
+
         target_devices = self._match_target(command.target)
         if not target_devices:
             logger.info(

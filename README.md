@@ -1,16 +1,23 @@
 # Quantum Home
 
-Local-first smart home control system for Raspberry Pi 4 with Home Assistant as the integration engine, a custom FastAPI backend, a React touchscreen UI, and a local voice command path.
+Local-first smart home control system for Raspberry Pi 4/5 with Home Assistant as the integration engine, a custom FastAPI backend, a React/Vite touchscreen UI with a glass (iOS-style) aesthetic, and a local voice command pipeline.
 
 ## Current Build
 
-This repository now contains the Phase 1/2 foundation:
+The repository contains a working end-to-end stack:
 
-- Docker Compose stack for Home Assistant, backend, frontend, and voice intent bridge.
-- FastAPI backend with Home Assistant REST/WebSocket client, normalized rooms/devices, actions, health checks, and frontend realtime WebSocket.
-- React/Vite touchscreen UI optimized for the 1024x600 Waveshare display.
-- Config-driven room/device mapping in `home-assistant/config/devices.yaml`.
-- Kiosk and deployment docs for the Raspberry Pi.
+- **Docker Compose stack** for Home Assistant, backend, frontend, and voice intent bridge.
+- **FastAPI backend** with Home Assistant REST/WebSocket client, normalized rooms/devices, device actions, scenes/routines, health checks, and a realtime WebSocket hub for the frontend.
+- **React/Vite touchscreen UI** optimized for the 1024×600 Waveshare display, featuring:
+  - Glass (frosted) UI across the sidebar, header, cards, dropdowns, and the login panel (`backdrop-filter` with translucent surfaces).
+  - A full‑viewport, audio‑reactive `SoftAurora` WebGL background (React Bits `SoftAurora-JS-CSS` component + `ogl`) whose noise amplitude and band height respond live to microphone RMS.
+  - A `Jarvis` status bar in the header showing idle/listening/processing/STT transcript states (replaces the old search bar).
+  - A notifications bell with unread badge and a dropdown feed of recent events.
+  - A `Settings` entry in the sidebar that expands to reveal `Hard refresh` and `Sign out`.
+  - A `News` tab that embeds [World Monitor](https://www.worldmonitor.app) inside the app via a reverse‑proxy (`/news-proxy/`) that strips `X-Frame-Options` / `Content-Security-Policy`.
+- **Voice intent service** with YAML‑driven templates (`home-assistant/config/commands.yaml`), room/device name matching (including space‑folded fuzzy matching for STT outputs like "tube light" vs. "Tubelight"), and a `navigate` action that tells the UI which view to switch to.
+- **Config‑driven room/device mapping** in `home-assistant/config/devices.yaml`.
+- **Kiosk and deployment docs** for the Raspberry Pi.
 
 ## Quick Start On The Pi
 
@@ -38,7 +45,32 @@ Open:
 - Quantum Home UI: `http://quantum-home.local:3000`
 - Backend API docs: `http://quantum-home.local:8080/docs`
 
-Use the Quantum Home app username/password from `.env` to sign in to the custom UI. Home Assistant credentials are only for Home Assistant administration and integration setup.
+Use the Quantum Home app username/password from `.env` to sign in to the custom UI. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
+
+## Frontend Architecture
+
+The frontend is a single-page Vite build served by nginx:
+
+- Our own assets are emitted under `/app-assets/*` (configured via `build.assetsDir` in `vite.config.js`) so they never collide with upstream paths used by the News proxy.
+- `nginx.conf` exposes:
+  - `/` → SPA fallback.
+  - `/news-proxy/*` → reverse proxy to `https://www.worldmonitor.app/` with response headers `X-Frame-Options`, `Content-Security-Policy`, `Strict-Transport-Security`, and the X-Origin policies stripped, plus `sub_filter` rules that rewrite absolute upstream URLs back to same-origin paths and neutralise the injected `<meta http-equiv="Content-Security-Policy">` tag.
+  - `/assets/*`, `/favico/*`, `/_next/*`, `/api/*`, and other common root-relative paths used by the News upstream → forwarded to the same upstream so the embedded page can resolve its assets and XHR calls through the iframe's origin.
+
+The `SoftAurora` background component lives in `frontend/src/components/SoftAurora/` (shadcn-style in-tree copy of the React Bits registry item). It accepts an `audioLevelRef` prop; a `useMicLevel()` hook in `main.jsx` wires up `navigator.mediaDevices.getUserMedia` → `AudioContext.AnalyserNode` and exposes a smoothed RMS level via a ref. The shader modulates `uNoiseAmp`, `uNoiseFreq`, `uBandHeight`, and `uBandSpread` each frame based on that level, so the aurora reacts to voice while keeping the WebGL context stable.
+
+## Voice Commands
+
+Templates are declared in `home-assistant/config/commands.yaml` under `intents.*.templates`. Examples:
+
+- `turn on {target}` / `turn off {target}` / `toggle {target}` (device or room).
+- `set {target} to {percent} percent` (brightness / percentage-capable devices).
+- `make {target} warm` / `white` / `cool` (color-capable lights).
+- `show me latest news`, `show the news`, `open news`, `go to news`, `latest news`, `news` → triggers a `navigate` action with `view: News`, and the frontend switches tabs (useful for any future view as well).
+
+Matching is case-insensitive, strips punctuation and filler prefixes (`"hey"`, `"okay"`, `"jarvis"`, `"please"`, `"could you"`, etc.), and falls back to space-folded comparison so STT outputs like `"tube light"` still match the registry name `"Tubelight"`.
+
+Each voice command pushes a `voice.command` event over the backend WebSocket; the frontend uses it to drive the Jarvis status bar, push notifications for `command_error` / `error`, and switch views when the response contains a `navigate` field.
 
 ## Development
 
@@ -52,6 +84,14 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8080
 ```
 
+Run tests:
+
+```bash
+cd backend
+. .venv/bin/activate
+python -m pytest
+```
+
 Frontend:
 
 ```bash
@@ -59,6 +99,8 @@ cd frontend
 npm install
 npm run dev -- --host 0.0.0.0
 ```
+
+The Vite dev server proxies `/api` and `/ws` to `http://localhost:8080`. The `/news-proxy/` path only exists in the production nginx build.
 
 ## Device Mapping
 
@@ -72,11 +114,27 @@ curl http://quantum-home.local:8080/api/ha/entities
 
 Then replace the example entity IDs in `home-assistant/config/devices.yaml`.
 
+## Backend API Surface
+
+All endpoints sit under `/api/` on port 8080. Authenticated ones require a Bearer token from `/api/auth/login` or `/api/auth/kiosk`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/auth/login` | Sign in with `APP_USERNAME` / `APP_PASSWORD`. Returns `{ token, username }`. |
+| POST | `/api/auth/kiosk` | Localhost-only auto-login for the kiosk display. |
+| GET  | `/api/system/health` | Backend + Home Assistant reachability. |
+| GET  | `/api/ha/entities` | Raw Home Assistant entity list (for device mapping). |
+| GET  | `/api/rooms` · `/api/rooms/{id}` | Rooms with nested device state. |
+| GET  | `/api/devices` · `/api/devices/{id}` | Flat device list / single device. |
+| POST | `/api/devices/{id}/toggle` | Toggle a device. |
+| POST | `/api/devices/{id}/set` | Set brightness / percentage / color / state. |
+| GET  | `/api/scenes` · `/api/scenes/{id}` | Scenes (routines). |
+| POST | `/api/scenes/{id}/run` | Run a scene. |
+| POST | `/api/voice/command` | Submit transcribed text for intent matching. Returns `{ understood, message, matched_device_ids, navigate? }`. |
+| POST | `/api/voice/event` | Push a voice pipeline status update (`listening`, `processing`, ...). |
+| GET  | `/api/voice/commands` | Enumerates templates and valid targets (for help / UI hints). |
+| WS   | `/ws?token=...` | Realtime `snapshot`, `device.updated`, `voice.status`, `voice.command`, `scene.ran` events. |
+
 ## iOS App Plan
 
-The iOS app will use the same backend as the touchscreen UI:
-
-- First launch asks for the Quantum Home server address, initially `http://quantum-home.local:8080`.
-- User signs in with the Quantum Home app username/password.
-- The app stores the returned token in Keychain.
-- Rooms, devices, actions, and realtime updates come from the backend, not directly from Home Assistant.
+See `implementation_plan.md` §9 for the full plan. At a high level, the iOS app talks to the same backend as the touchscreen UI — never to Home Assistant directly — and mirrors the touchscreen's visual language (glass surfaces, audio-reactive aurora background, Jarvis status bar, notifications, rooms/devices, routines, activity, news).

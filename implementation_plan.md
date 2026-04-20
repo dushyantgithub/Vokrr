@@ -190,20 +190,166 @@ sudo PI_USER=$USER ./scripts/phase0_setup.sh
 Once the script finishes and the Pi reboots cleanly, Phase 0 is considered complete and we can proceed to Phase 1 (Home Assistant deployment).
 
 ## 9. Added Scope – iOS App
-The iOS app is a native companion client for the same local-first backend. It does not talk directly to Home Assistant.
 
-### Requirements
-1. First launch requires Quantum Home server address discovery or manual entry.
-2. User signs in using the Quantum Home app username/password.
-3. App stores the returned token in Keychain.
-4. App loads rooms/devices from the backend.
-5. App controls devices through the same backend action APIs used by the touchscreen UI.
-6. App subscribes to realtime updates over backend WebSocket.
-7. App handles offline/local-network unavailable states clearly.
+The iOS app is a native companion for the same local-first backend. It never talks to Home Assistant directly. It targets feature parity with the touchscreen UI and mirrors its visual language (glass surfaces, audio‑reactive aurora background, Jarvis status bar).
 
-### Recommended iOS Stack
-- Swift + SwiftUI for UI.
-- URLSession for REST calls.
-- URLSessionWebSocketTask for realtime updates.
-- Keychain for token storage.
-- Bonjour/mDNS discovery later, with manual `http://quantum-home.local:8080` entry as the first implementation.
+### 9.1 Requirements
+
+1. First launch asks for (or discovers) the Quantum Home server address, defaulting to `http://quantum-home.local:8080`.
+2. User signs in with the Quantum Home app username/password (not Home Assistant credentials).
+3. The returned token is stored in Keychain; subsequent launches attempt it against `/api/system/health` before showing login.
+4. The app loads rooms, devices, scenes/routines, and system health from the backend, and controls devices through the same action APIs used by the touchscreen UI.
+5. The app subscribes to the backend WebSocket for live state, voice, and scene events.
+6. The app handles offline/local-network-unavailable states clearly (banner + retry) and never silently hangs on a dead server.
+7. The app follows the touchscreen UI visual language: glass (translucent blurred) cards and chrome, an audio-reactive aurora background, a Jarvis status bar in the nav, a notifications feed, and an embedded News view.
+
+### 9.2 Feature Parity With The Touchscreen UI
+
+The iOS app should render each of the touchscreen's primary views. The navigation surface is a bottom tab bar (`Dashboard`, `Devices`, `Routines`, `Activity`, `News`, `Settings`) on iPhone and a `NavigationSplitView` sidebar on iPad, matching the touchscreen's `Sidebar`.
+
+| Touchscreen surface | iOS implementation |
+| --- | --- |
+| Dashboard hero device card with brightness/colour/percentage | Large `DeviceCard` (Metal/SwiftUI) with a slider, colour temperature chips, and power toggle. |
+| `DeviceTile` grid (per-room) | `LazyVGrid` of glass tiles with long-press for detail. |
+| Dimmable `LightRow` list | `LightRow` view with inline brightness slider. |
+| `RoomTabs` | Horizontal `ScrollView` of chips above the dashboard content. |
+| `DevicesView` | All devices grid with search/filter. |
+| `RoutinesView` (`scenes`) | Grid of scene cards that post `POST /api/scenes/{id}/run`. |
+| `ActivityView` (health, assistant state, device counts) | Grid of status cards. |
+| `NewsView` (embedded `worldmonitor.app`) | `WKWebView` loading `https://www.worldmonitor.app` directly — WKWebView is not subject to the X‑Frame-Options / frame-ancestors restrictions the web iframe is, so the nginx proxy is **not** required from iOS. |
+| `Header` Jarvis status bar | Top-safe-area overlay showing `JARVIS_STATUS_LABELS` states (`idle`, `listening`, `processing`, `done`, `error`, `command_error`) plus transcribed STT text. |
+| Notifications bell + dropdown | Toolbar bell button + modal/side sheet with recent entries (device updates, voice errors, scene runs). |
+| Settings popover (`Hard refresh`, `Sign out`) | Settings tab with server address, account, cache clear (equivalent to hard refresh: purges `URLCache.shared`, in-memory snapshots, `WKWebsiteDataStore` for News), `Sign out`. |
+| `SoftAurora` background | Metal shader port of the same GLSL used in `frontend/src/components/SoftAurora/SoftAurora.jsx` with `uNoiseAmp` / `uBandHeight` driven by live mic RMS. |
+| Voice command → `navigate` view switch | WebSocket handler switches the selected tab when `voice.command.navigate` is a known view. |
+
+### 9.3 Recommended iOS Stack
+
+- Swift 5.10+, iOS 17 deployment target.
+- SwiftUI for all UI; `@Observable` / `Observation` for state, `NavigationStack` + `TabView` (or `NavigationSplitView` on iPad).
+- `URLSession` (async/await) for REST, `URLSessionWebSocketTask` for the realtime feed.
+- `AVFoundation` (`AVAudioEngine` + `AVAudioPCMBuffer`) for the mic-reactive background level.
+- `MetalKit` (`MTKView`) for the `SoftAurora` shader, or fall back to SwiftUI `Canvas` + `TimelineView` if Metal is unavailable.
+- `WebKit` (`WKWebView`) for the News tab.
+- `Keychain Services` (wrapped in a small `KeychainClient`) for the auth token and server address.
+- `Network.framework` + `NWPathMonitor` for offline detection; `Bonjour`/`NWBrowser` for mDNS discovery of `_quantum-home._tcp.local.` once the backend advertises it.
+- `os.Logger` + `OSLogStore` for diagnostics.
+
+### 9.4 App Module Layout
+
+```
+QuantumHomeiOS/
+├── App/
+│   ├── QuantumHomeApp.swift            # @main, scene setup, environment injection
+│   └── AppState.swift                  # @Observable root store (rooms, devices, scenes, voice, notifications, health)
+├── Networking/
+│   ├── APIClient.swift                 # async REST calls, token header injection
+│   ├── Endpoints.swift                 # strongly typed paths + payloads
+│   ├── RealtimeClient.swift            # URLSessionWebSocketTask lifecycle + event decoding
+│   └── ServerDiscovery.swift           # NWBrowser Bonjour + manual entry fallback
+├── Auth/
+│   ├── KeychainClient.swift
+│   └── LoginViewModel.swift
+├── Models/
+│   ├── Room.swift
+│   ├── Device.swift                    # mirrors backend `Device` / `DeviceState` / `Capability`
+│   ├── Scene.swift
+│   ├── VoiceStatus.swift
+│   └── Notification.swift
+├── Views/
+│   ├── RootView.swift                  # Tab/Split container with Aurora background
+│   ├── Dashboard/
+│   │   ├── DashboardView.swift
+│   │   ├── HeroDeviceCard.swift
+│   │   ├── DeviceTile.swift
+│   │   ├── LightRow.swift
+│   │   └── RoomTabs.swift
+│   ├── Devices/DevicesView.swift
+│   ├── Routines/RoutinesView.swift
+│   ├── Activity/ActivityView.swift
+│   ├── News/NewsView.swift             # WKWebView wrapper
+│   ├── Settings/SettingsView.swift
+│   └── Chrome/
+│       ├── JarvisStatusBar.swift
+│       └── NotificationsSheet.swift
+├── Effects/
+│   ├── AuroraBackground.swift          # MTKView + shader
+│   ├── SoftAurora.metal                # port of SoftAurora.jsx fragment shader
+│   └── MicLevelReader.swift            # AVAudioEngine RMS reader → @Published level
+└── Resources/
+    ├── Assets.xcassets                 # SF Symbols + brand mark
+    └── Info.plist                      # NSMicrophoneUsageDescription, ATS, Bonjour
+```
+
+### 9.5 Authentication & Server Flow
+
+1. On launch, read `serverBaseURL` + `authToken` from Keychain.
+2. If both exist, call `GET /api/system/health` with the token; on 200 proceed to app shell.
+3. If 401, fall back to `LoginView` which posts to `POST /api/auth/login` with `{username, password}` and stores `{token}` in Keychain.
+4. If the server address is missing or unreachable, show `ServerSetupView` with manual entry (`http://quantum-home.local:8080`) and Bonjour results.
+5. All subsequent REST calls attach `Authorization: Bearer <token>`; WebSocket connects to `ws(s)://<host>/ws?token=<token>`.
+6. On any 401, purge Keychain and route back to login.
+7. "Sign out" purges Keychain, closes the WebSocket, and clears in-memory state.
+
+### 9.6 Realtime & Voice Integration
+
+- WebSocket events and the app's reaction:
+  - `snapshot` → replace rooms/devices in `AppState`.
+  - `device.updated` → merge into the matching room/device (same shape as `mergeDevice()` in `main.jsx`).
+  - `voice.status` → update `JarvisStatusBar` label (`listening`, `processing`, etc.).
+  - `voice.command` → update status bar + append to notifications when `understood == false` (`command_error` / `error`).  When payload contains `navigate` and the value matches a known tab (`Dashboard`, `Devices`, `Routines`, `Activity`, `News`), switch the selected tab.
+  - `scene.ran` → append to notifications.
+- The iOS app does **not** do wake-word / STT locally; it shows state driven by the Pi's voice pipeline. The Jarvis status bar is a read-only mirror. A future phase can add a "push-to-talk" button that posts transcribed text to `POST /api/voice/command`.
+
+### 9.7 Microphone-Reactive Aurora
+
+- Request mic permission on first app launch with a clear usage string in `Info.plist` ("Reactive background animation and optional voice control").
+- `MicLevelReader` uses `AVAudioEngine.inputNode.installTap(onBus: 0, ...)` with a 1024-sample buffer, computes RMS per buffer, smooths with an exponential filter (`smoothed = 0.85·smoothed + 0.15·rms`), and publishes a `@Published var level: Float` in `[0, 1]`.
+- `AuroraBackground` hosts an `MTKView`. The fragment shader is a direct port of `SoftAurora.jsx` (keep uniform names identical: `uTime`, `uNoiseFreq`, `uNoiseAmp`, `uBandHeight`, `uBandSpread`, `uColor1`, `uColor2`, etc.). Each frame the renderer updates these uniforms using the base values and the current mic level, with the same gain formulas as the web component:
+  - `uNoiseAmp = base · (1 + level · 1.5)`
+  - `uNoiseFreq = base · (1 + level · 0.6)`
+  - `uBandHeight = base + level · 0.45`
+  - `uBandSpread = base · (1 + level · 1.2)`
+- If the user denies mic access, the aurora keeps rendering at base values.
+- Pause rendering in `scenePhase == .background` to save battery.
+
+### 9.8 Glass UI Guidelines
+
+Match the touchscreen visual language:
+
+- Use `.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))` for cards and `.thinMaterial` for the sidebar / bottom bar. Accent colour `#CBB3FF`, secondary accent `#8FD3FF`.
+- Typography: SF Pro; dashboards use `rounded` weight for the big numbers (`HeroDeviceCard.bigNumber`).
+- Device-on states keep a purple tint: `LinearGradient` from `#2A2242` to `#1C1C22` at 55% opacity over the aurora.
+- All modals use `.presentationDetents([.medium, .large])` with `.presentationBackground(.thinMaterial)`.
+- Dark mode only (match the touchscreen kiosk).
+
+### 9.9 News Tab
+
+- Present `WKWebView` configured with:
+  - `allowsBackForwardNavigationGestures = true`
+  - `configuration.websiteDataStore = .nonPersistent()` to avoid accumulating cookies from third-party news sites.
+  - A toolbar with `Back`, `Reload`, `Open in Safari` (using `UIApplication.shared.open`).
+- Initial URL: `https://www.worldmonitor.app`. Handle `didFailProvisionalNavigation` with a retry + offline card.
+- The voice command `show me latest news` (any of the templates in `home-assistant/config/commands.yaml`) will switch to this tab via the `navigate` event.
+
+### 9.10 Offline & Error Handling
+
+- `NWPathMonitor` drives a `ReachabilityBanner` at the top of the app when the server is unreachable.
+- All REST calls go through `APIClient.request(_:)` which centralises: timeouts (5s connect, 15s read), retries for transient errors (2×), 401 handling, and mapping to a `QuantumHomeError` enum (`unauthorized`, `unreachable`, `serverError(String)`).
+- The WebSocket client uses exponential backoff reconnect with jitter, capped at 30 s.
+- When offline, device toggles fail fast with a toast — no optimistic mutation is committed until the server confirms via `device.updated`.
+
+### 9.11 Delivery Phases
+
+- **iOS‑Phase 0:** Xcode project scaffold, `AppState`, Keychain, login flow against the running Pi, rooms/devices list (read-only), device toggles, health banner.
+- **iOS‑Phase 1:** Hero device card with brightness/colour sliders, per-room grid, routines, realtime WebSocket merge of `device.updated`.
+- **iOS‑Phase 2:** Jarvis status bar + notifications feed driven by `voice.status` / `voice.command` / `scene.ran`. News tab (`WKWebView`).
+- **iOS‑Phase 3:** Aurora background (Metal shader) + `MicLevelReader`. Settings screen (server address, cache clear, sign out). Bonjour discovery.
+- **iOS‑Phase 4:** iPad layout with `NavigationSplitView`, iOS Widgets (single-device toggle), and a Siri Shortcut that posts to `POST /api/voice/command`.
+
+### 9.12 Backend Touch-Ups Needed For The iOS App
+
+- Add a Bonjour/mDNS advertisement on the Pi (`avahi-publish-service "Quantum Home" _quantum-home._tcp 8080`, or an `avahi-aliases`-style systemd unit) so `NWBrowser` can auto-discover the server.
+- Expose a capability manifest endpoint (e.g. `GET /api/system/manifest`) returning app version, min client version, and feature flags so iOS can refuse to start against an incompatible backend.
+- Consider device-scoped push credentials (per-device tokens) instead of the single shared `APP_PASSWORD` once the iOS app ships.
+- When the backend starts serving HTTPS (planned post‑LAN phase), add a self-signed certificate trust flow in iOS (pinning or a user-approved certificate).
