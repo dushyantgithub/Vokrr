@@ -1,4 +1,4 @@
-from app.domain.models import Capability, Device, DeviceSetRequest, Room
+from app.domain.models import Capability, Device, DeviceSetRequest, Room, RoomSetRequest
 from app.services.home_assistant import HomeAssistantClient
 from app.services.registry import DeviceRegistry
 
@@ -53,6 +53,18 @@ class DeviceService:
         device.state.is_on = not device.state.is_on
         device.state.state = "on" if device.state.is_on else "off"
         return device
+
+    async def set_room(self, room_id: str, request: RoomSetRequest) -> Room:
+        room = self.room(room_id)
+        if request.state is None:
+            raise UnsupportedCapabilityError("Room state update requires an on/off value")
+
+        for device in room.devices:
+            if Capability.toggle not in device.capabilities:
+                continue
+            await self.set_device(device.id, DeviceSetRequest(state=request.state))
+
+        return room
 
     async def set_device(self, device_id: str, request: DeviceSetRequest) -> Device:
         device = self.device(device_id)

@@ -125,6 +125,7 @@ All endpoints sit under `/api/` on port 8080. Authenticated ones require a Beare
 | GET  | `/api/system/health` | Backend + Home Assistant reachability. |
 | GET  | `/api/ha/entities` | Raw Home Assistant entity list (for device mapping). |
 | GET  | `/api/rooms` · `/api/rooms/{id}` | Rooms with nested device state. |
+| POST | `/api/rooms/{id}/set` | Power a room on or off by updating all toggle-capable devices in that room. |
 | GET  | `/api/devices` · `/api/devices/{id}` | Flat device list / single device. |
 | POST | `/api/devices/{id}/toggle` | Toggle a device. |
 | POST | `/api/devices/{id}/set` | Set brightness / percentage / color / state. |
@@ -138,3 +139,5 @@ All endpoints sit under `/api/` on port 8080. Authenticated ones require a Beare
 ## iOS App Plan
 
 See `implementation_plan.md` §9 for the full plan. At a high level, the iOS app talks to the same backend as the touchscreen UI — never to Home Assistant directly — and mirrors the touchscreen's visual language (glass surfaces, audio-reactive aurora background, Jarvis status bar, notifications, rooms/devices, routines, activity, news).
+
+The current native app implementation lives in [ios/QuantumHome](./ios/QuantumHome) and its setup/testing notes live in [docs/setup/ios-app.md](./docs/setup/ios-app.md).

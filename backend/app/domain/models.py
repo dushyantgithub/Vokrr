@@ -50,6 +50,10 @@ class Room(BaseModel):
     devices: list[Device] = Field(default_factory=list)
 
 
+class RoomSetRequest(BaseModel):
+    state: bool | None = None
+
+
 class DeviceSetRequest(BaseModel):
     state: bool | None = None
     brightness: int | None = Field(default=None, ge=0, le=100)

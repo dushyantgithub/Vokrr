@@ -7,6 +7,7 @@ from app.domain.models import (
     LoginRequest,
     LoginResponse,
     Room,
+    RoomSetRequest,
     Scene,
     SceneRunResponse,
     VoiceCommandRequest,
@@ -83,6 +84,29 @@ async def room(room_id: str, state: AppState = Depends(get_app_state)) -> Room:
         return state.device_service.room(room_id)
     except DeviceNotFoundError:
         raise HTTPException(status_code=404, detail="Room not found") from None
+
+
+@router.post(
+    "/api/rooms/{room_id}/set",
+    response_model=Room,
+    dependencies=[Depends(require_user)],
+)
+async def set_room(
+    room_id: str,
+    request: RoomSetRequest,
+    state: AppState = Depends(get_app_state),
+) -> Room:
+    try:
+        room = await state.device_service.set_room(room_id, request)
+        await state.websocket_manager.broadcast(
+            "snapshot",
+            {"rooms": [current_room.model_dump() for current_room in state.device_service.rooms()]},
+        )
+        return room
+    except DeviceNotFoundError:
+        raise HTTPException(status_code=404, detail="Room not found") from None
+    except UnsupportedCapabilityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.get("/api/devices", response_model=list[Device], dependencies=[Depends(require_user)])
