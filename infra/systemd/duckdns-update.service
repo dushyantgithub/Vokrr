@@ -1,0 +1,10 @@
+[Unit]
+Description=Update DuckDNS record for Quantum Home
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=quantum-hive
+WorkingDirectory=/home/quantum-hive/Projects/quantum-home
+ExecStart=/home/quantum-hive/Projects/quantum-home/scripts/update_duckdns.sh

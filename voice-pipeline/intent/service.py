@@ -6,8 +6,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 BACKEND_URL = os.getenv("VOICE_BACKEND_URL", "http://backend:8080").rstrip("/")
-APP_USERNAME = os.getenv("APP_USERNAME", "admin")
-APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+APP_USERNAME = os.getenv("APP_BOOTSTRAP_ADMIN_USERNAME") or os.getenv("APP_USERNAME", "admin")
+APP_PASSWORD = os.getenv("APP_BOOTSTRAP_ADMIN_PASSWORD") or os.getenv("APP_PASSWORD", "")
 
 app = FastAPI(title="Quantum Home Voice Intent Bridge", version="0.1.0")
 _token: str | None = None
@@ -48,6 +48,6 @@ async def get_token() -> str:
         )
     if response.status_code >= 400:
         raise HTTPException(status_code=503, detail="Voice bridge could not authenticate")
-    _token = response.json()["token"]
+    _token = response.json()["access_token"]
     _token_time = time.time()
     return _token

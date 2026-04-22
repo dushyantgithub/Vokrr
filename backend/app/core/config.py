@@ -1,11 +1,16 @@
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, Field
+from pydantic import AliasChoices, AnyHttpUrl, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_name: str = "Quantum Home"
     backend_host: str = "0.0.0.0"
@@ -17,9 +22,20 @@ class Settings(BaseSettings):
     home_assistant_token: str = ""
     device_config_path: str = "/app/config/devices.yaml"
     command_config_path: str = "/app/config/commands.yaml"
-    app_username: str = "admin"
-    app_password: str = "change-this-password"
+    auth_database_path: str = "/app/data/auth.db"
+    app_bootstrap_admin_username: str = Field(
+        default="admin",
+        validation_alias=AliasChoices("APP_BOOTSTRAP_ADMIN_USERNAME", "APP_USERNAME"),
+    )
+    app_bootstrap_admin_password: str = Field(
+        default="change-this-admin-password",
+        validation_alias=AliasChoices("APP_BOOTSTRAP_ADMIN_PASSWORD", "APP_PASSWORD"),
+    )
     app_auth_secret: str = "change-this-random-secret"
+    access_token_ttl_seconds: int = 900
+    refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
+    app_registration_enabled: bool = False
+    app_registration_code: str = ""
     kiosk_auto_login: bool = True
 
     @property

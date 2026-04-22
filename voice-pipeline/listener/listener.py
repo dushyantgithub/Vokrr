@@ -11,8 +11,8 @@ import numpy as np
 from fastapi import FastAPI
 
 BACKEND_URL = os.getenv("VOICE_BACKEND_URL", "http://localhost:8080").rstrip("/")
-APP_USERNAME = os.getenv("APP_USERNAME", "admin")
-APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+APP_USERNAME = os.getenv("APP_BOOTSTRAP_ADMIN_USERNAME") or os.getenv("APP_USERNAME", "admin")
+APP_PASSWORD = os.getenv("APP_BOOTSTRAP_ADMIN_PASSWORD") or os.getenv("APP_PASSWORD", "")
 WAKE_WORD_DISPLAY = os.getenv("VOICE_WAKE_WORD", "Jarvis")
 PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_API_KEY") or os.getenv("PORCUPINE_ACCESS_KEY", "")
 PORCUPINE_KEYWORD_PATH = Path(
@@ -309,7 +309,7 @@ def get_token() -> str:
             json={"username": APP_USERNAME, "password": APP_PASSWORD},
         )
     response.raise_for_status()
-    token_cache["token"] = response.json()["token"]
+    token_cache["token"] = response.json()["access_token"]
     token_cache["time"] = time.time()
     return str(token_cache["token"])
 

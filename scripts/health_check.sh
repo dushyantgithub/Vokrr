@@ -16,8 +16,8 @@ elif [[ -f .env ]]; then
   set +a
 fi
 
-APP_USERNAME="${APP_USERNAME:-admin}"
-APP_PASSWORD="${APP_PASSWORD:-admin}"
+APP_USERNAME="${APP_BOOTSTRAP_ADMIN_USERNAME:-${APP_USERNAME:-admin}}"
+APP_PASSWORD="${APP_BOOTSTRAP_ADMIN_PASSWORD:-${APP_PASSWORD:-admin}}"
 BACKEND_URL="${BACKEND_URL:-http://localhost:8080}"
 FRONTEND_URL="${FRONTEND_URL:-http://localhost:3000}"
 HA_URL="${HOME_ASSISTANT_URL:-http://localhost:8123}"
@@ -49,7 +49,7 @@ TOKEN="$(
     -H 'Content-Type: application/json' \
     -d "{\"username\":\"${APP_USERNAME}\",\"password\":\"${APP_PASSWORD}\"}" \
     "${BACKEND_URL}/api/auth/login" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])'
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
 )"
 
 ROOM_COUNT="$(

@@ -5,12 +5,14 @@ The native iOS client lives in `ios/QuantumHome/`.
 ## What It Includes
 
 - SwiftUI iPhone app targeting iOS 16+.
-- Login-first flow using the backend `POST /api/auth/login` endpoint.
-- Default server address generated from `IOS_DEFAULT_SERVER_URL` in the repo `.env`.
+- Login flow backed by the public Quantum Home backend over HTTPS.
+- Short-lived JWT access tokens plus refresh-token rotation.
+- Default server address generated from `IOS_DEFAULT_SERVER_URL`.
 - Live room, device, routine, activity, news, and settings views.
-- Device state updates through the real backend APIs.
-- Room-level power updates through `POST /api/rooms/{id}/set`.
+- Device state updates through the backend APIs only.
 - WebSocket subscription for `snapshot`, `device.updated`, `voice.status`, `voice.command`, and `scene.ran`.
+
+The iOS app should talk only to your backend hostname, for example `https://api.vokrr.com`. It should not call Home Assistant directly and it no longer needs Tailscale for normal remote usage.
 
 ## Local Build
 
@@ -22,38 +24,26 @@ xcodebuild -project ios/QuantumHome/QuantumHome.xcodeproj \
   build
 ```
 
-## Test On iPhone 13
+## Test On iPhone
 
-1. Open `ios/QuantumHome/QuantumHome.xcodeproj` in Xcode 26 or newer.
+1. Open `ios/QuantumHome/QuantumHome.xcodeproj` in Xcode.
 2. Select the `QuantumHome` scheme.
-3. Connect your iPhone 13 over USB and trust the Mac if prompted.
-4. In Xcode, choose your iPhone 13 as the run destination.
-5. Open target settings and set your Apple Developer Team under `Signing & Capabilities`.
-6. Keep the bundle identifier as-is or change it if your team requires a unique identifier.
-7. Confirm the server field in the login screen matches `IOS_DEFAULT_SERVER_URL` from your `.env`.
-8. Sign in with:
-   - Username: `admin`
-   - Password: `admin`
-9. Verify:
-   - Dashboard loads live rooms and devices.
-   - Device tiles open details and can toggle state.
-   - Room cards can power a whole room on or off.
-   - Routines execute from the backend.
-   - Activity reflects backend and WebSocket status.
-   - News loads inside the app.
+3. Choose your iPhone as the run destination.
+4. Set your Apple Developer Team in `Signing & Capabilities`.
+5. In the app login screen, set the server to your public backend URL such as `https://api.vokrr.com`.
+6. Sign in with the bootstrap admin account you configured on the Raspberry Pi.
+7. Verify:
+   - Dashboard loads rooms and devices over mobile data or a different Wi-Fi network.
+   - Device toggles work.
+   - Room power actions work.
+   - Routines execute.
+   - Realtime updates reconnect after backgrounding the app.
+   - Signing out clears the local session.
 
-## Any-Network Plan
+## Security Model
 
-This is the follow-on plan once you want access from outside your current private network setup:
-
-1. Put the backend behind a public reverse proxy such as Caddy, Nginx, or Traefik on the Raspberry Pi or a fronting host.
-2. Serve the backend over HTTPS with a real certificate from Let’s Encrypt.
-3. Expose only the backend, not Home Assistant directly, and keep Home Assistant private on the Pi.
-4. Move from a single shared password to per-user accounts or at least per-device tokens with revocation.
-5. Add request rate limiting and audit logging on login and control endpoints.
-6. Add a small `/api/system/manifest` endpoint for client-version compatibility checks.
-7. Add DNS such as `api.quantum-home.yourdomain.com` and switch the iOS default server URL to that hostname.
-8. Optional hardening:
-   - mTLS or signed device enrollment for trusted clients.
-   - Push notifications for important home events.
-   - Background refresh for stale state detection.
+1. Home Assistant stays private on the Raspberry Pi LAN and is never exposed publicly.
+2. The backend is the only internet-facing service.
+3. TLS is terminated at the public edge, typically by Cloudflare Tunnel for CGNAT-safe deployments.
+4. Backend auth is database-backed with per-user credentials, JWT access tokens, refresh-token rotation, and activity logging.
+5. New user registration is disabled by default and can be enabled temporarily with a registration code.

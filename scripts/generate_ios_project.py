@@ -131,7 +131,7 @@ def resolve_comment(object_id: str, file_refs: dict[Path, str], files: list[Path
 
 def generate_project() -> None:
     generate_app_environment()
-    default_server_url = load_env_value("IOS_DEFAULT_SERVER_URL", "http://quantum-home.local:8080")
+    default_server_url = load_env_value("IOS_DEFAULT_SERVER_URL", "https://api.quantum-home.example")
     files = collect_project_files(APP_ROOT)
     ids = IDPool()
 
@@ -476,7 +476,7 @@ def generate_app_environment() -> None:
 
 enum AppEnvironment {
     static let defaultServerURL = Bundle.main.object(forInfoDictionaryKey: "QuantumHomeDefaultServerURL") as? String
-        ?? "http://quantum-home.local:8080"
+        ?? "https://api.quantum-home.example"
 }
 '''
     )

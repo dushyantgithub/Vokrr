@@ -29,7 +29,7 @@ cp .env.example .env
 Edit `.env` and set:
 
 - `HOME_ASSISTANT_TOKEN` after creating a long-lived access token in Home Assistant.
-- `APP_USERNAME`, `APP_PASSWORD`, and `APP_AUTH_SECRET` for the Quantum Home app login.
+- `APP_BOOTSTRAP_ADMIN_USERNAME`, `APP_BOOTSTRAP_ADMIN_PASSWORD`, and `APP_AUTH_SECRET` for the initial Quantum Home admin account.
 
 Keep `HOME_ASSISTANT_URL=http://localhost:8123` for the Docker Compose stack because the backend runs on host networking.
 
@@ -45,7 +45,17 @@ Open:
 - Quantum Home UI: `http://quantum-home.local:3000`
 - Backend API docs: `http://quantum-home.local:8080/docs`
 
-Use the Quantum Home app username/password from `.env` to sign in to the custom UI. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
+Use the Quantum Home bootstrap admin credentials from `.env` to sign in initially. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
+
+## Remote Access
+
+The recommended remote-access path is Cloudflare Tunnel, not direct router exposure. This is especially important on CGNAT-backed ISPs where port forwarding cannot work reliably.
+
+- Public API hostname: `https://api.vokrr.com`
+- Tunnel runtime: Docker Compose `cloudflared` service under the `cloudflare` profile
+- Setup guide: [docs/deployment/cloudflare-tunnel.md](./docs/deployment/cloudflare-tunnel.md)
+
+The iOS app and any future external clients should use only the backend hostname. Do not expose Home Assistant directly.
 
 ## Frontend Architecture
 
@@ -116,12 +126,18 @@ Then replace the example entity IDs in `home-assistant/config/devices.yaml`.
 
 ## Backend API Surface
 
-All endpoints sit under `/api/` on port 8080. Authenticated ones require a Bearer token from `/api/auth/login` or `/api/auth/kiosk`.
+All endpoints sit under `/api/` on port 8080. Authenticated ones require a Bearer access token from `/api/auth/login`, `/api/auth/refresh`, or `/api/auth/kiosk`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/api/auth/login` | Sign in with `APP_USERNAME` / `APP_PASSWORD`. Returns `{ token, username }`. |
+| POST | `/api/auth/login` | Sign in with a database-backed user account. Returns `{ access_token, refresh_token, expires_in, user }`. |
+| POST | `/api/auth/refresh` | Rotate a refresh token and obtain a new access token pair. |
+| POST | `/api/auth/logout` | Revoke the current refresh token. |
+| GET  | `/api/auth/me` | Return the current authenticated user. |
 | POST | `/api/auth/kiosk` | Localhost-only auto-login for the kiosk display. |
+| POST | `/api/auth/register` | Optional self-registration when enabled with a registration code. |
+| POST | `/api/admin/users` | Admin-only user creation endpoint. |
+| GET  | `/api/admin/activity` | Admin-only audit log of auth and control actions. |
 | GET  | `/api/system/health` | Backend + Home Assistant reachability. |
 | GET  | `/api/ha/entities` | Raw Home Assistant entity list (for device mapping). |
 | GET  | `/api/rooms` · `/api/rooms/{id}` | Rooms with nested device state. |

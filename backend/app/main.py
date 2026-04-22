@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state = build_app_state()
+    Path(state.settings.auth_database_path).parent.mkdir(parents=True, exist_ok=True)
     set_app_state(state)
     try:
         await state.device_service.sync_states()

@@ -57,7 +57,7 @@ final class APIClient {
         return url
     }
 
-    func login(baseURL: String, username: String, password: String) async throws -> LoginResponse {
+    func login(baseURL: String, username: String, password: String) async throws -> AuthSession {
         struct LoginRequest: Encodable {
             let username: String
             let password: String
@@ -69,6 +69,24 @@ final class APIClient {
             method: "POST",
             token: nil,
             body: LoginRequest(username: username, password: password)
+        )
+    }
+
+    func refreshSession(baseURL: String, refreshToken: String) async throws -> AuthSession {
+        struct RefreshRequest: Encodable {
+            let refreshToken: String
+
+            enum CodingKeys: String, CodingKey {
+                case refreshToken = "refresh_token"
+            }
+        }
+
+        return try await send(
+            path: "/api/auth/refresh",
+            baseURL: baseURL,
+            method: "POST",
+            token: nil,
+            body: RefreshRequest(refreshToken: refreshToken)
         )
     }
 
@@ -122,6 +140,24 @@ final class APIClient {
         )
     }
 
+    func logout(baseURL: String, refreshToken: String, accessToken: String) async throws {
+        struct LogoutRequest: Encodable {
+            let refreshToken: String
+
+            enum CodingKeys: String, CodingKey {
+                case refreshToken = "refresh_token"
+            }
+        }
+
+        let _: EmptyResponse = try await send(
+            path: "/api/auth/logout",
+            baseURL: baseURL,
+            method: "POST",
+            token: accessToken,
+            body: LogoutRequest(refreshToken: refreshToken)
+        )
+    }
+
     private func send<Response: Decodable>(
         path: String,
         baseURL: String,
@@ -150,6 +186,9 @@ final class APIClient {
             }
             switch http.statusCode {
             case 200 ..< 300:
+                if data.isEmpty, Response.self == EmptyResponse.self {
+                    return EmptyResponse() as! Response
+                }
                 do {
                     return try decoder.decode(Response.self, from: data)
                 } catch {
@@ -172,6 +211,8 @@ final class APIClient {
 private struct ServerErrorResponse: Decodable {
     let detail: String
 }
+
+private struct EmptyResponse: Decodable {}
 
 private struct AnyEncodable: Encodable {
     private let encodeClosure: (Encoder) throws -> Void

@@ -1,12 +1,18 @@
 import Foundation
 import Security
 
+private struct StoredSession: Codable {
+    let accessToken: String
+    let refreshToken: String
+}
+
 final class KeychainClient {
     private let service = "QuantumHome.iOS"
-    private let tokenKey = "authToken"
+    private let tokenKey = "authSession"
 
-    func saveToken(_ token: String) {
-        let data = Data(token.utf8)
+    func saveSession(accessToken: String, refreshToken: String) {
+        let payload = StoredSession(accessToken: accessToken, refreshToken: refreshToken)
+        guard let data = try? JSONEncoder().encode(payload) else { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -17,7 +23,7 @@ final class KeychainClient {
         SecItemAdd(query as CFDictionary, nil)
     }
 
-    func loadToken() -> String? {
+    func loadSession() -> (accessToken: String, refreshToken: String)? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -30,10 +36,16 @@ final class KeychainClient {
         guard status == errSecSuccess, let data = result as? Data else {
             return nil
         }
-        return String(data: data, encoding: .utf8)
+        if let decoded = try? JSONDecoder().decode(StoredSession.self, from: data) {
+            return (decoded.accessToken, decoded.refreshToken)
+        }
+        if let token = String(data: data, encoding: .utf8) {
+            return (token, "")
+        }
+        return nil
     }
 
-    func clearToken() {
+    func clearSession() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

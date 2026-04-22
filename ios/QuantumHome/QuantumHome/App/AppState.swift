@@ -7,7 +7,7 @@ final class AppState: ObservableObject {
     @Published var phase: AppPhase = .booting
     @Published var serverURL = AppEnvironment.defaultServerURL
     @Published var username = "admin"
-    @Published var password = "admin"
+    @Published var password = ""
     @Published var rooms: [Room] = []
     @Published var scenes: [Routine] = []
     @Published var health: HealthResponse?
@@ -28,7 +28,7 @@ final class AppState: ObservableObject {
     private let realtimeClient = RealtimeClient()
     private let keychainClient = KeychainClient()
     private let defaults = UserDefaults.standard
-    private var authToken: String?
+    private var session: AuthSession?
 
     init() {
         if let storedURL = defaults.string(forKey: "serverURL"), !storedURL.isEmpty {
@@ -60,16 +60,23 @@ final class AppState: ObservableObject {
 
     func bootstrap() async {
         if phase != .booting { return }
-        authToken = keychainClient.loadToken()
-        if let authToken {
+        if let stored = keychainClient.loadSession() {
             do {
-                try await loadInitialData(using: authToken)
+                let restored = AuthSession(
+                    accessToken: stored.accessToken,
+                    refreshToken: stored.refreshToken,
+                    tokenType: "Bearer",
+                    expiresIn: 0,
+                    user: SessionUser(id: "", username: username, isAdmin: false)
+                )
+                session = restored
+                try await loadInitialData()
                 phase = .ready
-                connectRealtime()
+                await connectRealtime()
                 return
             } catch {
-                keychainClient.clearToken()
-                self.authToken = nil
+                keychainClient.clearSession()
+                session = nil
             }
         }
         do {
@@ -84,13 +91,16 @@ final class AppState: ObservableObject {
         isBusy = true
         loginError = ""
         do {
-            let response = try await apiClient.login(baseURL: serverURL, username: username, password: password)
-            keychainClient.saveToken(response.token)
+            let nextSession = try await apiClient.login(
+                baseURL: serverURL,
+                username: username,
+                password: password
+            )
+            storeSession(nextSession)
             defaults.set(apiClient.normalizeServerURL(serverURL), forKey: "serverURL")
-            authToken = response.token
-            try await loadInitialData(using: response.token)
+            try await loadInitialData()
             phase = .ready
-            connectRealtime()
+            await connectRealtime()
         } catch {
             loginError = error.localizedDescription
             phase = .login
@@ -99,9 +109,9 @@ final class AppState: ObservableObject {
     }
 
     func refresh() async {
-        guard let authToken else { return }
+        guard session != nil else { return }
         do {
-            try await loadInitialData(using: authToken)
+            try await loadInitialData()
         } catch {
             bannerMessage = error.localizedDescription
         }
@@ -110,11 +120,11 @@ final class AppState: ObservableObject {
     func saveServerURL(_ value: String) async {
         serverURL = apiClient.normalizeServerURL(value)
         defaults.set(serverURL, forKey: "serverURL")
-        if let token = authToken {
+        if session != nil {
             realtimeClient.disconnect()
             do {
-                try await loadInitialData(using: token)
-                connectRealtime()
+                try await loadInitialData()
+                await connectRealtime()
             } catch {
                 bannerMessage = error.localizedDescription
             }
@@ -122,14 +132,16 @@ final class AppState: ObservableObject {
     }
 
     func signOut() {
-        keychainClient.clearToken()
-        realtimeClient.disconnect()
-        authToken = nil
-        rooms = []
-        scenes = []
-        selectedRoomID = nil
-        notifications = []
-        phase = .login
+        Task {
+            if let session {
+                try? await apiClient.logout(
+                    baseURL: serverURL,
+                    refreshToken: session.refreshToken,
+                    accessToken: session.accessToken
+                )
+            }
+            performLocalSignOut()
+        }
     }
 
     func clearNewsCache() {
@@ -141,20 +153,31 @@ final class AppState: ObservableObject {
     }
 
     func toggleDevice(_ device: Device) async {
-        guard let token = authToken else { return }
         do {
-            let updated = try await apiClient.toggleDevice(baseURL: serverURL, token: token, deviceID: device.id)
+            let updated = try await withAuthorizedAccessToken { token in
+                try await apiClient.toggleDevice(baseURL: serverURL, token: token, deviceID: device.id)
+            }
             mergeDevice(updated)
-            pushNotification(title: updated.name, detail: updated.state.isOn ? "Turned on" : "Turned off", level: .info)
+            pushNotification(
+                title: updated.name,
+                detail: updated.state.isOn ? "Turned on" : "Turned off",
+                level: .info
+            )
         } catch {
             bannerMessage = error.localizedDescription
         }
     }
 
     func setDevice(_ device: Device, request: DeviceSetRequest) async {
-        guard let token = authToken else { return }
         do {
-            let updated = try await apiClient.setDevice(baseURL: serverURL, token: token, deviceID: device.id, request: request)
+            let updated = try await withAuthorizedAccessToken { token in
+                try await apiClient.setDevice(
+                    baseURL: serverURL,
+                    token: token,
+                    deviceID: device.id,
+                    request: request
+                )
+            }
             mergeDevice(updated)
         } catch {
             bannerMessage = error.localizedDescription
@@ -162,23 +185,39 @@ final class AppState: ObservableObject {
     }
 
     func setRoomState(_ room: Room, isOn: Bool) async {
-        guard let token = authToken else { return }
         do {
-            let updated = try await apiClient.setRoomState(baseURL: serverURL, token: token, roomID: room.id, isOn: isOn)
+            let updated = try await withAuthorizedAccessToken { token in
+                try await apiClient.setRoomState(
+                    baseURL: serverURL,
+                    token: token,
+                    roomID: room.id,
+                    isOn: isOn
+                )
+            }
             mergeRoom(updated)
-            pushNotification(title: room.name, detail: isOn ? "Room powered on" : "Room powered off", level: .info)
+            pushNotification(
+                title: room.name,
+                detail: isOn ? "Room powered on" : "Room powered off",
+                level: .info
+            )
         } catch {
             do {
-                for device in room.devices where device.capabilities.contains(.toggle) {
-                    let updated = try await apiClient.setDevice(
-                        baseURL: serverURL,
-                        token: token,
-                        deviceID: device.id,
-                        request: DeviceSetRequest(state: isOn)
-                    )
-                    mergeDevice(updated)
+                try await withAuthorizedAccessToken { token in
+                    for device in room.devices where device.capabilities.contains(.toggle) {
+                        let updated = try await apiClient.setDevice(
+                            baseURL: serverURL,
+                            token: token,
+                            deviceID: device.id,
+                            request: DeviceSetRequest(state: isOn)
+                        )
+                        mergeDevice(updated)
+                    }
                 }
-                pushNotification(title: room.name, detail: isOn ? "Room powered on" : "Room powered off", level: .info)
+                pushNotification(
+                    title: room.name,
+                    detail: isOn ? "Room powered on" : "Room powered off",
+                    level: .info
+                )
             } catch {
                 bannerMessage = error.localizedDescription
             }
@@ -186,11 +225,12 @@ final class AppState: ObservableObject {
     }
 
     func runScene(_ scene: Routine) async {
-        guard let token = authToken else { return }
         do {
-            let response = try await apiClient.runScene(baseURL: serverURL, token: token, sceneID: scene.id)
+            let response = try await withAuthorizedAccessToken { token in
+                try await apiClient.runScene(baseURL: serverURL, token: token, sceneID: scene.id)
+            }
             pushNotification(title: response.name, detail: "Routine executed", level: .info)
-            try await loadInitialData(using: token)
+            try await loadInitialData()
         } catch {
             bannerMessage = error.localizedDescription
         }
@@ -200,10 +240,14 @@ final class AppState: ObservableObject {
         selectedRoomID = id
     }
 
-    private func loadInitialData(using token: String) async throws {
+    private func loadInitialData() async throws {
         async let nextHealth = apiClient.fetchHealth(baseURL: serverURL)
-        async let nextRooms = apiClient.fetchRooms(baseURL: serverURL, token: token)
-        async let nextScenes = apiClient.fetchScenes(baseURL: serverURL, token: token)
+        async let nextRooms = withAuthorizedAccessToken { token in
+            try await apiClient.fetchRooms(baseURL: serverURL, token: token)
+        }
+        async let nextScenes = withAuthorizedAccessToken { token in
+            try await apiClient.fetchScenes(baseURL: serverURL, token: token)
+        }
 
         health = try await nextHealth
         rooms = try await nextRooms
@@ -213,11 +257,67 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func connectRealtime() {
-        guard let token = authToken, let url = try? apiClient.websocketURL(baseURL: serverURL, token: token) else {
-            return
+    private func connectRealtime() async {
+        do {
+            let accessToken = try await currentAccessToken()
+            guard let url = try? apiClient.websocketURL(baseURL: serverURL, token: accessToken) else {
+                return
+            }
+            realtimeClient.connect(to: url)
+        } catch {
+            bannerMessage = error.localizedDescription
         }
-        realtimeClient.connect(to: url)
+    }
+
+    private func currentAccessToken() async throws -> String {
+        try await withAuthorizedAccessToken { token in token }
+    }
+
+    private func withAuthorizedAccessToken<T>(
+        _ operation: (String) async throws -> T
+    ) async throws -> T {
+        guard let currentSession = session else {
+            throw APIError.unauthorized
+        }
+        do {
+            return try await operation(currentSession.accessToken)
+        } catch APIError.unauthorized {
+            guard !currentSession.refreshToken.isEmpty else {
+                performLocalSignOut()
+                throw APIError.unauthorized
+            }
+            do {
+                let refreshed = try await apiClient.refreshSession(
+                    baseURL: serverURL,
+                    refreshToken: currentSession.refreshToken
+                )
+                storeSession(refreshed)
+                return try await operation(refreshed.accessToken)
+            } catch {
+                performLocalSignOut()
+                throw error
+            }
+        }
+    }
+
+    private func storeSession(_ nextSession: AuthSession) {
+        session = nextSession
+        username = nextSession.user.username
+        keychainClient.saveSession(
+            accessToken: nextSession.accessToken,
+            refreshToken: nextSession.refreshToken
+        )
+    }
+
+    private func performLocalSignOut() {
+        keychainClient.clearSession()
+        realtimeClient.disconnect()
+        session = nil
+        rooms = []
+        scenes = []
+        selectedRoomID = nil
+        notifications = []
+        phase = .login
     }
 
     private func handleRealtimeEvent(event: String, payload: Data) {

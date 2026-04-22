@@ -162,8 +162,8 @@ function App() {
         return response.json();
       })
       .then((data) => {
-        localStorage.setItem(TOKEN_KEY, data.token);
-        setToken(data.token);
+        localStorage.setItem(TOKEN_KEY, data.access_token);
+        setToken(data.access_token);
       })
       .catch(() => setLoginError("Sign in on this device."))
       .finally(() => setKioskLoginPending(false));
@@ -324,8 +324,8 @@ function App() {
       return;
     }
     const data = await response.json();
-    localStorage.setItem(TOKEN_KEY, data.token);
-    setToken(data.token);
+    localStorage.setItem(TOKEN_KEY, data.access_token);
+    setToken(data.access_token);
   }
 
   function logout() {

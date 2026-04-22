@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.core.config import Settings, get_settings
+from app.services.auth import AuthService
 from app.services.device_service import DeviceService
 from app.services.home_assistant import HomeAssistantClient
 from app.services.intent import CommandCatalog, IntentService
@@ -13,6 +15,7 @@ from app.services.websocket_manager import WebSocketManager
 @dataclass
 class AppState:
     settings: Settings
+    auth_service: AuthService
     ha_client: HomeAssistantClient
     registry: DeviceRegistry
     websocket_manager: WebSocketManager
@@ -28,6 +31,9 @@ _state: AppState | None = None
 
 def build_app_state() -> AppState:
     settings = get_settings()
+    Path(settings.auth_database_path).parent.mkdir(parents=True, exist_ok=True)
+    auth_service = AuthService(settings)
+    auth_service.ensure_bootstrap_admin()
     ha_client = HomeAssistantClient(str(settings.home_assistant_url), settings.home_assistant_token)
     registry = DeviceRegistry(settings.device_config_path)
     registry.load()
@@ -39,6 +45,7 @@ def build_app_state() -> AppState:
     state_sync = StateSyncService(ha_client, registry, websocket_manager)
     return AppState(
         settings=settings,
+        auth_service=auth_service,
         ha_client=ha_client,
         registry=registry,
         websocket_manager=websocket_manager,

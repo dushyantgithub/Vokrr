@@ -28,6 +28,7 @@ services:
     volumes:
       - ../home-assistant/config/devices.yaml:/app/config/devices.yaml:ro
       - ../home-assistant/config/commands.yaml:/app/config/commands.yaml:ro
+      - ../backend/data:/app/data
     depends_on:
       - homeassistant
 
@@ -67,5 +68,18 @@ services:
       - ../wake-word:/wake-word:ro
     devices:
       - /dev/snd:/dev/snd
+    depends_on:
+      - backend
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: quantum-home-cloudflared
+    restart: unless-stopped
+    profiles:
+      - cloudflare
+    network_mode: host
+    env_file:
+      - ../scripts/.env
+    command: tunnel --no-autoupdate run
     depends_on:
       - backend

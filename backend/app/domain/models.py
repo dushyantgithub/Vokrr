@@ -85,9 +85,50 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class LoginResponse(BaseModel):
-    token: str
+class AuthUser(BaseModel):
+    id: str
     username: str
+    is_admin: bool = False
+
+
+class AuthSessionResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "Bearer"
+    expires_in: int
+    user: AuthUser
+
+
+class RefreshSessionRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    registration_code: str
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    is_admin: bool = False
+
+
+class ActivityLogEntry(BaseModel):
+    id: int
+    user_id: str | None = None
+    username: str | None = None
+    action: str
+    success: bool
+    client_ip: str | None = None
+    user_agent: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
 
 
 class VoiceCommandRequest(BaseModel):

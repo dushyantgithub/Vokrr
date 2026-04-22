@@ -369,7 +369,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = QuantumHome/Info.plist;
-				IOS_DEFAULT_SERVER_URL = http://quantum-home.local:8080;
+				IOS_DEFAULT_SERVER_URL = https://api.vokrr.com;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -395,7 +395,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = QuantumHome/Info.plist;
-				IOS_DEFAULT_SERVER_URL = http://quantum-home.local:8080;
+				IOS_DEFAULT_SERVER_URL = https://api.vokrr.com;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

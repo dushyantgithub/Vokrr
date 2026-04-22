@@ -25,15 +25,15 @@ The Compose stack runs Home Assistant and the backend with host networking so LA
 
 ## Quantum Home App Login
 
-Home Assistant accounts are not used as normal Quantum Home app accounts. Set local app credentials in `.env`:
+Home Assistant accounts are not used as normal Quantum Home app accounts. Set the bootstrap Quantum Home admin account in `.env`:
 
 ```bash
-APP_USERNAME=admin
-APP_PASSWORD=replace-this
+APP_BOOTSTRAP_ADMIN_USERNAME=admin
+APP_BOOTSTRAP_ADMIN_PASSWORD=replace-this-with-a-strong-password
 APP_AUTH_SECRET=replace-with-a-long-random-string
 ```
 
-Touchscreen, web, and future iOS clients call `POST /api/auth/login`, then use the returned token for protected room/device APIs and WebSocket state updates.
+Touchscreen, web, voice, and iOS clients call `POST /api/auth/login`, then use the returned `access_token` for protected room/device APIs and WebSocket state updates.
 
 ## Entity Discovery
 
