@@ -146,6 +146,100 @@ struct SystemRestartResponse: Codable {
     let detail: String
 }
 
+struct OnboardingIntegration: Codable, Identifiable, Equatable {
+    let domain: String
+    let title: String
+    let description: String
+    let setupKind: String
+    let homeAssistantPath: String
+    let icon: String?
+
+    var id: String { domain }
+
+    enum CodingKeys: String, CodingKey {
+        case domain
+        case title
+        case description
+        case setupKind = "setup_kind"
+        case homeAssistantPath = "home_assistant_path"
+        case icon
+    }
+}
+
+struct OnboardingRoomOption: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let icon: String
+}
+
+struct OnboardingCandidate: Codable, Identifiable, Equatable {
+    let id: String
+    let entityID: String
+    let entityIDs: [String]
+    let haDeviceID: String?
+    let name: String
+    let domain: String
+    let platform: String?
+    let areaID: String?
+    let roomID: String?
+    let roomName: String?
+    let type: DeviceType
+    let capabilities: [Capability]
+    let state: DeviceState
+    let alreadyImported: Bool
+    let existingDeviceID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case entityID = "entity_id"
+        case entityIDs = "entity_ids"
+        case haDeviceID = "ha_device_id"
+        case name
+        case domain
+        case platform
+        case areaID = "area_id"
+        case roomID = "room_id"
+        case roomName = "room_name"
+        case type
+        case capabilities
+        case state
+        case alreadyImported = "already_imported"
+        case existingDeviceID = "existing_device_id"
+    }
+}
+
+struct OnboardingSnapshotResponse: Codable, Equatable {
+    let integrations: [OnboardingIntegration]
+    let candidates: [OnboardingCandidate]
+    let rooms: [OnboardingRoomOption]
+    let homeAssistantURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case integrations
+        case candidates
+        case rooms
+        case homeAssistantURL = "home_assistant_url"
+    }
+}
+
+struct DeviceImportRequest: Encodable {
+    let candidateID: String
+    let roomID: String
+    let displayName: String?
+    let isVisible: Bool
+    let isFavorite: Bool
+    let capabilitiesOverride: [Capability]?
+
+    enum CodingKeys: String, CodingKey {
+        case candidateID = "candidate_id"
+        case roomID = "room_id"
+        case displayName = "display_name"
+        case isVisible = "is_visible"
+        case isFavorite = "is_favorite"
+        case capabilitiesOverride = "capabilities_override"
+    }
+}
+
 struct HealthResponse: Codable {
     struct HomeAssistantStatus: Codable {
         let ok: Bool

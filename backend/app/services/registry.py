@@ -7,8 +7,9 @@ from app.domain.models import Capability, Device, DeviceState, DeviceType, Room,
 
 
 class DeviceRegistry:
-    def __init__(self, config_path: str) -> None:
+    def __init__(self, config_path: str, onboarding_repository: Any | None = None) -> None:
         self.config_path = Path(config_path)
+        self.onboarding_repository = onboarding_repository
         self.rooms: list[Room] = []
         self.scenes: list[Scene] = []
         self.scenes_by_id: dict[str, Scene] = {}
@@ -42,6 +43,8 @@ class DeviceRegistry:
                     entity_id=device_config["entity_id"],
                     room_id=room_id,
                     room_name=room_name,
+                    source="configured",
+                    entity_ids=[device_config["entity_id"]],
                     capabilities=[
                         Capability(capability)
                         for capability in device_config.get("capabilities", [])
@@ -75,11 +78,48 @@ class DeviceRegistry:
             )
             scenes.append(scene)
 
+        room_lookup = {room.id: room for room in rooms}
+
+        for imported in self.onboarding_repository.list_imported_devices() if self.onboarding_repository else []:
+            imported_room = room_lookup.get(imported.room_id)
+            if imported_room is None:
+                imported_room = Room(
+                    id=imported.room_id,
+                    name=imported.room_id.replace("_", " ").title(),
+                    icon="room",
+                    devices=[],
+                )
+                rooms.append(imported_room)
+                room_lookup[imported.room_id] = imported_room
+
+            imported_device = self._build_imported_device(imported, imported_room.name)
+            imported_room.devices.append(imported_device)
+            devices[imported_device.id] = imported_device
+            for entity_id in imported.entity_ids:
+                entity_to_device_id[entity_id] = imported_device.id
+
         self.rooms = rooms
         self.scenes = scenes
         self.scenes_by_id = {scene.id: scene for scene in scenes}
         self.devices = devices
         self.entity_to_device_id = entity_to_device_id
+
+    def _build_imported_device(self, imported: Any, room_name: str) -> Device:
+        primary_entity_id = imported.primary_entity_id
+        return Device(
+            id=imported.id,
+            name=imported.display_name,
+            type=DeviceType(imported.device_type),
+            entity_id=primary_entity_id,
+            room_id=imported.room_id,
+            room_name=room_name,
+            source="imported",
+            ha_device_id=imported.ha_device_id,
+            entity_ids=imported.entity_ids,
+            is_visible=imported.is_visible,
+            is_favorite=imported.is_favorite,
+            capabilities=[Capability(capability) for capability in imported.capabilities],
+        )
 
     def all_rooms(self) -> list[Room]:
         return self.rooms

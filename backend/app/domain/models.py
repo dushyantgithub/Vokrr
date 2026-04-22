@@ -39,6 +39,11 @@ class Device(BaseModel):
     entity_id: str
     room_id: str
     room_name: str
+    source: str = "configured"
+    ha_device_id: str | None = None
+    entity_ids: list[str] = Field(default_factory=list)
+    is_visible: bool = True
+    is_favorite: bool = False
     capabilities: list[Capability] = Field(default_factory=list)
     state: DeviceState = Field(default_factory=DeviceState)
 
@@ -122,6 +127,55 @@ class CreateUserRequest(BaseModel):
 class SystemRestartResponse(BaseModel):
     accepted: bool = True
     detail: str
+
+
+class OnboardingRoomOption(BaseModel):
+    id: str
+    name: str
+    icon: str = "room"
+
+
+class OnboardingIntegration(BaseModel):
+    domain: str
+    title: str
+    description: str
+    setup_kind: str
+    home_assistant_path: str
+    icon: str | None = None
+
+
+class OnboardingCandidate(BaseModel):
+    id: str
+    entity_id: str
+    entity_ids: list[str] = Field(default_factory=list)
+    ha_device_id: str | None = None
+    name: str
+    domain: str
+    platform: str | None = None
+    area_id: str | None = None
+    room_id: str | None = None
+    room_name: str | None = None
+    type: DeviceType = DeviceType.unknown
+    capabilities: list[Capability] = Field(default_factory=list)
+    state: DeviceState = Field(default_factory=DeviceState)
+    already_imported: bool = False
+    existing_device_id: str | None = None
+
+
+class OnboardingSnapshotResponse(BaseModel):
+    integrations: list[OnboardingIntegration] = Field(default_factory=list)
+    candidates: list[OnboardingCandidate] = Field(default_factory=list)
+    rooms: list[OnboardingRoomOption] = Field(default_factory=list)
+    home_assistant_url: str
+
+
+class DeviceImportRequest(BaseModel):
+    candidate_id: str
+    room_id: str
+    display_name: str | None = None
+    is_visible: bool = True
+    is_favorite: bool = False
+    capabilities_override: list[Capability] | None = None
 
 
 class ActivityLogEntry(BaseModel):

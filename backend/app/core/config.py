@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     device_config_path: str = "/app/config/devices.yaml"
     command_config_path: str = "/app/config/commands.yaml"
     auth_database_path: str = "/app/data/auth.db"
+    onboarding_database_path: str = "/app/data/onboarding.db"
     app_bootstrap_admin_username: str = Field(
         default="admin",
         validation_alias=AliasChoices("APP_BOOTSTRAP_ADMIN_USERNAME", "APP_USERNAME"),

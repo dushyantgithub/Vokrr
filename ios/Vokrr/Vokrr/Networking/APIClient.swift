@@ -181,6 +181,33 @@ final class APIClient {
         )
     }
 
+    func fetchOnboardingDiscovery(baseURL: String, token: String) async throws -> OnboardingSnapshotResponse {
+        try await send(path: "/api/admin/onboarding/discovery", baseURL: baseURL, token: token)
+    }
+
+    func refreshOnboardingDiscovery(baseURL: String, token: String) async throws -> OnboardingSnapshotResponse {
+        try await send(
+            path: "/api/admin/onboarding/refresh",
+            baseURL: baseURL,
+            method: "POST",
+            token: token
+        )
+    }
+
+    func importOnboardingCandidate(
+        baseURL: String,
+        token: String,
+        request: DeviceImportRequest
+    ) async throws -> Device {
+        try await send(
+            path: "/api/admin/onboarding/import",
+            baseURL: baseURL,
+            method: "POST",
+            token: token,
+            body: request
+        )
+    }
+
     private func send<Response: Decodable>(
         path: String,
         baseURL: String,

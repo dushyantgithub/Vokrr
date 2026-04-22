@@ -161,6 +161,9 @@ function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState("");
   const [restartPending, setRestartPending] = useState(false);
+  const [onboardingSnapshot, setOnboardingSnapshot] = useState(null);
+  const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [onboardingImportingId, setOnboardingImportingId] = useState("");
   const refreshInFlightRef = useRef(null);
 
   const token = authSession?.access_token || "";
@@ -255,6 +258,12 @@ function App() {
     }, 18);
     return () => window.clearInterval(timer);
   }, [assistantMessage]);
+
+  useEffect(() => {
+    if (!token || !isAdmin || activeView !== "Settings") return;
+    if (onboardingSnapshot) return;
+    loadOnboardingDiscovery();
+  }, [activeView, isAdmin, onboardingSnapshot, token]);
 
   const selectedRoom = useMemo(
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0],
@@ -488,6 +497,47 @@ function App() {
     window.setTimeout(() => loadHealth(), 4000);
   }
 
+  async function loadOnboardingDiscovery(forceRefresh = false) {
+    if (!isAdmin) return;
+    setOnboardingLoading(true);
+    const path = forceRefresh ? "/api/admin/onboarding/refresh" : "/api/admin/onboarding/discovery";
+    const response = await authFetch(path, { method: forceRefresh ? "POST" : "GET" });
+    setOnboardingLoading(false);
+    if (!response.ok) {
+      await showApiError(response, "Could not load Home Assistant discovery");
+      return;
+    }
+    const data = await response.json();
+    setOnboardingSnapshot(data);
+  }
+
+  async function importOnboardingCandidate(candidate, payload) {
+    setOnboardingImportingId(candidate.id);
+    const response = await authFetch("/api/admin/onboarding/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidate_id: candidate.id,
+        room_id: payload.roomId,
+        display_name: payload.displayName,
+        is_visible: true,
+        is_favorite: payload.isFavorite,
+        capabilities_override: null,
+      }),
+    });
+    setOnboardingImportingId("");
+    if (!response.ok) {
+      await showApiError(response, `Could not import ${candidate.name}`);
+      return false;
+    }
+    const device = await response.json();
+    setSettingsMessage(`${device.name} added to ${device.room_name}.`);
+    pushNotification(`${device.name} added to dashboard`, "info");
+    await loadSnapshot();
+    await loadOnboardingDiscovery(true);
+    return true;
+  }
+
   if (!token) {
     if (kioskLoginPending) {
       return (
@@ -582,9 +632,14 @@ function App() {
             healthError={healthError}
             settingsMessage={settingsMessage}
             restartPending={restartPending}
+            onboardingSnapshot={onboardingSnapshot}
+            onboardingLoading={onboardingLoading}
+            onboardingImportingId={onboardingImportingId}
             onRestart={restartRaspberryPi}
             onHardRefresh={hardRefresh}
             onLogout={logout}
+            onRefreshDiscovery={() => loadOnboardingDiscovery(true)}
+            onImportCandidate={importOnboardingCandidate}
           />
         )}
       </section>
@@ -1136,16 +1191,60 @@ function SettingsView({
   healthError,
   settingsMessage,
   restartPending,
+  onboardingSnapshot,
+  onboardingLoading,
+  onboardingImportingId,
   onRestart,
   onHardRefresh,
   onLogout,
+  onRefreshDiscovery,
+  onImportCandidate,
 }) {
+  const [drafts, setDrafts] = useState({});
+
   const haOk = health?.home_assistant?.ok;
   const systemStatus = healthError
     ? "Backend unreachable"
     : haOk
       ? "Backend and Home Assistant are healthy."
       : "Backend is online but Home Assistant needs attention.";
+  const rooms = onboardingSnapshot?.rooms ?? [];
+  const candidates = (onboardingSnapshot?.candidates ?? []).filter((candidate) => !candidate.already_imported);
+
+  useEffect(() => {
+    if (!candidates.length) return;
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const candidate of candidates) {
+        next[candidate.id] = next[candidate.id] || {
+          displayName: candidate.name,
+          roomId: candidate.room_id || rooms[0]?.id || "",
+          isFavorite: false,
+        };
+      }
+      return next;
+    });
+  }, [candidates, rooms]);
+
+  function updateDraft(candidateId, patch) {
+    setDrafts((current) => ({
+      ...current,
+      [candidateId]: {
+        displayName: "",
+        roomId: rooms[0]?.id || "",
+        isFavorite: false,
+        ...(current[candidateId] || {}),
+        ...patch,
+      },
+    }));
+  }
+
+  function openHomeAssistant(path) {
+    if (!onboardingSnapshot?.home_assistant_url) return;
+    const normalizedBase = onboardingSnapshot.home_assistant_url.replace(/\/+$/, "");
+    const normalizedPath = path?.startsWith("/") ? path : `/${path || "config/integrations/dashboard"}`;
+    window.open(`${normalizedBase}${normalizedPath}`, "_blank", "noopener,noreferrer");
+  }
 
   return (
     <div className="simpleView settingsView scrollSurface" data-swipe-scroll="true">
@@ -1186,11 +1285,124 @@ function SettingsView({
         </button>
       </section>
 
-      <section className="settingsCard">
-        <p className="muted caps">Next actions</p>
-        <h3>Reserved for device onboarding</h3>
-        <p className="muted">This page is where future Raspberry Pi admin actions and Home Assistant sync controls should live. User creation remains iOS-only.</p>
-      </section>
+      {isAdmin && (
+        <>
+          <section className="settingsCard onboardingSection">
+            <div className="settingsInlineHead">
+              <div>
+                <p className="muted caps">Home Assistant onboarding</p>
+                <h3>Refresh and import discovered devices</h3>
+                <p className="muted">Home Assistant stays responsible for pairing. This page only imports discovered entities into Vokrr.</p>
+              </div>
+              <button
+                type="button"
+                className="settingsAction primary"
+                onClick={onRefreshDiscovery}
+                disabled={onboardingLoading}
+              >
+                <Icon name="refresh" />
+                <span>{onboardingLoading ? "Refreshing..." : "Refresh devices"}</span>
+              </button>
+            </div>
+
+            <div className="integrationRow">
+              {(onboardingSnapshot?.integrations ?? []).map((integration) => (
+                <button
+                  key={integration.domain}
+                  type="button"
+                  className="integrationChip"
+                  onClick={() => openHomeAssistant(integration.home_assistant_path)}
+                >
+                  <span>{integration.title}</span>
+                  <small>{integration.setup_kind === "handoff" ? "Open in HA" : "Setup"}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="settingsCard onboardingSection">
+            <p className="muted caps">Unmapped devices</p>
+            <h3>{candidates.length ? `${candidates.length} ready to import` : "No unmapped devices found"}</h3>
+            <p className="muted">
+              {candidates.length
+                ? "Choose the room and display name for each discovered Home Assistant device."
+                : "Complete setup in Home Assistant first, then refresh discovery here."}
+            </p>
+
+            {candidates.length > 0 && (
+              <div className="onboardingCandidateList" data-swipe-scroll="true">
+                {candidates.map((candidate) => {
+                  const draft = drafts[candidate.id] || {
+                    displayName: candidate.name,
+                    roomId: candidate.room_id || rooms[0]?.id || "",
+                    isFavorite: false,
+                  };
+                  const isSaving = onboardingImportingId === candidate.id;
+                  return (
+                    <article key={candidate.id} className="onboardingCandidateCard">
+                      <div className="onboardingCandidateMeta">
+                        <div>
+                          <h4>{candidate.name}</h4>
+                          <p className="muted">
+                            {candidate.domain.toUpperCase()} · {candidate.entity_ids.length} entity
+                          </p>
+                        </div>
+                        <span className="candidateTag">{candidate.type}</span>
+                      </div>
+
+                      <p className="candidateEntities">{candidate.entity_ids.join(", ")}</p>
+
+                      <label className="settingsField">
+                        <span>Display name</span>
+                        <input
+                          value={draft.displayName}
+                          onChange={(event) => updateDraft(candidate.id, { displayName: event.target.value })}
+                          placeholder="Device name"
+                        />
+                      </label>
+
+                      <div className="settingsFieldGrid">
+                        <label className="settingsField">
+                          <span>Room</span>
+                          <select
+                            value={draft.roomId}
+                            onChange={(event) => updateDraft(candidate.id, { roomId: event.target.value })}
+                          >
+                            {rooms.map((room) => (
+                              <option key={room.id} value={room.id}>
+                                {room.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="settingsCheckbox">
+                          <input
+                            type="checkbox"
+                            checked={draft.isFavorite}
+                            onChange={(event) => updateDraft(candidate.id, { isFavorite: event.target.checked })}
+                          />
+                          <span>Favourite</span>
+                        </label>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="settingsAction primary onboardingImportButton"
+                        disabled={isSaving || !draft.roomId || !draft.displayName.trim()}
+                        onClick={() => onImportCandidate(candidate, draft)}
+                      >
+                        <Icon name="devices" />
+                        <span>{isSaving ? "Saving..." : "Add to dashboard"}</span>
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
       {settingsMessage && <p className="settingsNotice pageNotice">{settingsMessage}</p>}
     </div>

@@ -21,6 +21,10 @@ struct RootView: View {
         .sheet(isPresented: $showsNotifications) {
             NotificationsSheet(notifications: appState.notifications)
         }
+        .fullScreenCover(isPresented: $appState.isDeviceOnboardingPresented) {
+            DeviceOnboardingFlow()
+                .environmentObject(appState)
+        }
         .sheet(item: $appState.selectedDevice) { device in
             DeviceDetailSheet(device: device)
                 .environmentObject(appState)

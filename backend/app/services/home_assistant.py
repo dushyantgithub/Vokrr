@@ -53,6 +53,38 @@ class HomeAssistantClient:
             response.raise_for_status()
             return response.json()
 
+    async def websocket_command(self, command_type: str, **payload: Any) -> Any:
+        if not self.token:
+            raise HomeAssistantError("HOME_ASSISTANT_TOKEN is required for WebSocket requests")
+
+        ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
+        async with websockets.connect(f"{ws_url}/api/websocket", ping_interval=20) as websocket:
+            auth_required = json.loads(await websocket.recv())
+            if auth_required.get("type") != "auth_required":
+                raise HomeAssistantError(f"Unexpected HA auth handshake: {auth_required}")
+
+            await websocket.send(json.dumps({"type": "auth", "access_token": self.token}))
+            auth_ok = json.loads(await websocket.recv())
+            if auth_ok.get("type") != "auth_ok":
+                raise HomeAssistantError(f"Home Assistant WebSocket auth failed: {auth_ok}")
+
+            request_id = 1
+            await websocket.send(json.dumps({"id": request_id, "type": command_type, **payload}))
+
+            while True:
+                message = json.loads(await websocket.recv())
+                if message.get("id") != request_id or message.get("type") != "result":
+                    continue
+                if not message.get("success"):
+                    raise HomeAssistantError(
+                        f"Home Assistant WebSocket command failed: {message.get('error')}"
+                    )
+                return message.get("result")
+
+    async def entity_registry_for_display(self) -> list[dict[str, Any]]:
+        result = await self.websocket_command("config/entity_registry/list_for_display")
+        return result if isinstance(result, list) else []
+
     async def subscribe_state_changed(self) -> AsyncIterator[dict[str, Any]]:
         if not self.token:
             raise HomeAssistantError("HOME_ASSISTANT_TOKEN is required for WebSocket updates")
@@ -90,4 +122,3 @@ class HomeAssistantClient:
             except Exception:
                 logger.exception("Home Assistant WebSocket disconnected; retrying in 5 seconds")
                 await asyncio.sleep(5)
-

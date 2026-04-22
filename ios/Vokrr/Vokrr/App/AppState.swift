@@ -24,6 +24,10 @@ final class AppState: ObservableObject {
     @Published var isBusy = false
     @Published var isCreatingUser = false
     @Published var isRestartingSystem = false
+    @Published var isDeviceOnboardingPresented = false
+    @Published var onboardingSnapshot: OnboardingSnapshotResponse?
+    @Published var isLoadingOnboarding = false
+    @Published var isImportingOnboardingCandidate = false
 
     let networkMonitor = NetworkMonitor()
 
@@ -378,6 +382,64 @@ final class AppState: ObservableObject {
             settingsMessage = error.localizedDescription
         }
         isRestartingSystem = false
+    }
+
+    func presentDeviceOnboarding() {
+        guard isAdmin else { return }
+        isDeviceOnboardingPresented = true
+        Task { await refreshOnboardingSnapshot() }
+    }
+
+    func dismissDeviceOnboarding() {
+        isDeviceOnboardingPresented = false
+    }
+
+    func refreshOnboardingSnapshot() async {
+        guard isAdmin else { return }
+        isLoadingOnboarding = true
+        do {
+            let snapshot = try await withAuthorizedAccessToken { token in
+                try await apiClient.refreshOnboardingDiscovery(baseURL: serverURL, token: token)
+            }
+            onboardingSnapshot = snapshot
+        } catch {
+            bannerMessage = error.localizedDescription
+        }
+        isLoadingOnboarding = false
+    }
+
+    func importOnboardingCandidate(
+        candidateID: String,
+        roomID: String,
+        displayName: String,
+        isFavorite: Bool
+    ) async -> Bool {
+        isImportingOnboardingCandidate = true
+        do {
+            let device = try await withAuthorizedAccessToken { token in
+                try await apiClient.importOnboardingCandidate(
+                    baseURL: serverURL,
+                    token: token,
+                    request: DeviceImportRequest(
+                        candidateID: candidateID,
+                        roomID: roomID,
+                        displayName: displayName,
+                        isVisible: true,
+                        isFavorite: isFavorite,
+                        capabilitiesOverride: nil
+                    )
+                )
+            }
+            pushNotification(title: device.name, detail: "Added to \(device.roomName)", level: .info)
+            try? await loadInitialData()
+            await refreshOnboardingSnapshot()
+            isImportingOnboardingCandidate = false
+            return true
+        } catch {
+            bannerMessage = error.localizedDescription
+            isImportingOnboardingCandidate = false
+            return false
+        }
     }
 
     private func handleRealtimeEvent(event: String, payload: Data) {

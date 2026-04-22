@@ -7,9 +7,13 @@ from app.domain.models import (
     AuthUser,
     CreateUserRequest,
     Device,
+    DeviceImportRequest,
     DeviceSetRequest,
     LoginRequest,
     LogoutRequest,
+    OnboardingIntegration,
+    OnboardingRoomOption,
+    OnboardingSnapshotResponse,
     RefreshSessionRequest,
     RegisterRequest,
     Room,
@@ -118,6 +122,66 @@ async def restart_system(
 ) -> SystemRestartResponse:
     auth.restart_system(actor, request)
     return SystemRestartResponse(detail="Raspberry Pi restart requested")
+
+
+@router.get("/api/admin/onboarding/integrations", response_model=list[OnboardingIntegration])
+async def onboarding_integrations(
+    actor: AuthenticatedUser = Depends(require_admin),
+    state: AppState = Depends(get_app_state),
+) -> list[OnboardingIntegration]:
+    _ = actor
+    return state.onboarding_service.integration_catalog
+
+
+@router.get("/api/admin/onboarding/rooms", response_model=list[OnboardingRoomOption])
+async def onboarding_rooms(
+    actor: AuthenticatedUser = Depends(require_admin),
+    state: AppState = Depends(get_app_state),
+) -> list[OnboardingRoomOption]:
+    _ = actor
+    snapshot = await state.onboarding_service.snapshot()
+    return snapshot.rooms
+
+
+@router.get("/api/admin/onboarding/discovery", response_model=OnboardingSnapshotResponse)
+async def onboarding_discovery(
+    actor: AuthenticatedUser = Depends(require_admin),
+    state: AppState = Depends(get_app_state),
+) -> OnboardingSnapshotResponse:
+    _ = actor
+    return await state.onboarding_service.snapshot()
+
+
+@router.post("/api/admin/onboarding/refresh", response_model=OnboardingSnapshotResponse)
+async def onboarding_refresh(
+    actor: AuthenticatedUser = Depends(require_admin),
+    state: AppState = Depends(get_app_state),
+) -> OnboardingSnapshotResponse:
+    _ = actor
+    return await state.onboarding_service.snapshot()
+
+
+@router.post("/api/admin/onboarding/import", response_model=Device)
+async def onboarding_import(
+    payload: DeviceImportRequest,
+    request: Request,
+    actor: AuthenticatedUser = Depends(require_admin),
+    state: AppState = Depends(get_app_state),
+) -> Device:
+    device = await state.onboarding_service.import_candidate(payload)
+    await state.device_service.sync_states()
+    await state.websocket_manager.broadcast(
+        "snapshot",
+        {"rooms": [current_room.model_dump() for current_room in state.device_service.rooms()]},
+    )
+    state.auth_service.record_activity(
+        "admin.device.import",
+        True,
+        user=actor,
+        request=request,
+        details={"device_id": device.id, "entity_id": device.entity_id, "room_id": device.room_id},
+    )
+    return device
 
 
 @router.post("/api/auth/kiosk", response_model=AuthSessionResponse)

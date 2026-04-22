@@ -1099,6 +1099,13 @@ h1, h2, h3, p { margin: 0; letter-spacing: 0; }
   gap: 12px;
 }
 
+.settingsInlineHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .settingsAction {
   display: inline-flex;
   align-items: center;
@@ -1134,6 +1141,145 @@ h1, h2, h3, p { margin: 0; letter-spacing: 0; }
   color: #ffb4a8;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.onboardingSection {
+  gap: 16px;
+}
+
+.integrationRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.integrationChip {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 18px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+}
+
+.integrationChip:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.integrationChip small {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.onboardingCandidateList {
+  display: grid;
+  gap: 12px;
+  max-height: min(54vh, 760px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.onboardingCandidateCard {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8, 10, 16, 0.42);
+}
+
+.onboardingCandidateMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.onboardingCandidateMeta h4 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.candidateTag {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.07);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.candidateEntities {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settingsFieldGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.settingsField {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsField span {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settingsField input,
+.settingsField select {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  outline: none;
+}
+
+.settingsField input:focus,
+.settingsField select:focus {
+  border-color: rgba(255,255,255,0.24);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
+}
+
+.settingsCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.settingsCheckbox input {
+  width: 16px;
+  height: 16px;
+}
+
+.onboardingImportButton {
+  justify-content: center;
 }
 
 .pageNotice {
@@ -1197,4 +1343,11 @@ h1, h2, h3, p { margin: 0; letter-spacing: 0; }
   .topActions { flex-wrap: wrap; }
   .dashboard, .simpleView { padding: 16px; }
   .deviceGrid { grid-template-columns: 1fr 1fr; }
+  .settingsInlineHead,
+  .onboardingCandidateMeta {
+    display: grid;
+  }
+  .settingsFieldGrid {
+    grid-template-columns: 1fr;
+  }
 }
