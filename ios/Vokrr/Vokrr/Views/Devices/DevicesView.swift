@@ -74,7 +74,7 @@ private enum OnboardingStep: Int {
     case assign
 }
 
-private struct DeviceOnboardingFlow: View {
+struct DeviceOnboardingFlow: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appState: AppState
