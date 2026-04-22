@@ -94,6 +94,10 @@ final class APIClient {
         try await send(path: "/api/system/health", baseURL: baseURL, token: nil)
     }
 
+    func fetchCurrentUser(baseURL: String, token: String) async throws -> SessionUser {
+        try await send(path: "/api/auth/me", baseURL: baseURL, token: token)
+    }
+
     func fetchRooms(baseURL: String, token: String) async throws -> [Room] {
         try await send(path: "/api/rooms", baseURL: baseURL, token: token)
     }
@@ -155,6 +159,25 @@ final class APIClient {
             method: "POST",
             token: accessToken,
             body: LogoutRequest(refreshToken: refreshToken)
+        )
+    }
+
+    func createUser(baseURL: String, token: String, request: CreateUserRequest) async throws -> SessionUser {
+        try await send(
+            path: "/api/admin/users",
+            baseURL: baseURL,
+            method: "POST",
+            token: token,
+            body: request
+        )
+    }
+
+    func restartSystem(baseURL: String, token: String) async throws -> SystemRestartResponse {
+        try await send(
+            path: "/api/admin/system/restart",
+            baseURL: baseURL,
+            method: "POST",
+            token: token
         )
     }
 

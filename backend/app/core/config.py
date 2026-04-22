@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     app_registration_enabled: bool = False
     app_registration_code: str = ""
     kiosk_auto_login: bool = True
+    system_restart_command: str = "nohup /bin/sh -c 'sleep 2 && /sbin/reboot' >/dev/null 2>&1 &"
 
     @property
     def cors_origins(self) -> list[str]:

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import SoftAurora from "./components/SoftAurora/SoftAurora.jsx";
 import "./styles.css";
 
 const API_BASE =
   window.location.port === "3000" || window.location.port === "5173"
     ? `${window.location.protocol}//${window.location.hostname}:8080`
     : "";
+const SESSION_KEY = "vokrr_auth_session";
 const TOKEN_KEY = "vokrr_token";
 const KIOSK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -16,12 +16,12 @@ const NAV_ITEMS = [
   { key: "Routines", label: "Routines", icon: "bookmark" },
   { key: "Activity", label: "Activity", icon: "clock" },
   { key: "News", label: "News", icon: "news" },
-  { key: "Settings", label: "Settings", icon: "settings", action: "settings" },
+  { key: "Settings", label: "Settings", icon: "settings" },
 ];
 
 const NEWS_URL = "/news-proxy/";
 const NEWS_URL_EXTERNAL = "https://www.worldmonitor.app";
-const VALID_VIEW_KEYS = new Set(["Dashboard", "Devices", "Routines", "Activity", "News"]);
+const VALID_VIEW_KEYS = new Set(["Dashboard", "Devices", "Routines", "Activity", "News", "Settings"]);
 
 const MAX_NOTIFICATIONS = 15;
 const JARVIS_STATUS_LABELS = {
@@ -41,64 +41,111 @@ const AC_PRESETS = [
   { key: "night", icon: "moon", label: "Night" },
 ];
 
-function useMicLevel() {
-  const levelRef = useRef(0);
+function loadStoredSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.access_token) return parsed;
+    }
+  } catch {
+    // Ignore malformed persisted data.
+  }
+  const legacyToken = localStorage.getItem(TOKEN_KEY);
+  if (!legacyToken) return null;
+  return {
+    access_token: legacyToken,
+    refresh_token: "",
+    token_type: "Bearer",
+    expires_in: 0,
+    user: null,
+  };
+}
+
+function useSwipeScroll(dependencies) {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    if (!navigator.mediaDevices?.getUserMedia || !(window.AudioContext || window.webkitAudioContext)) {
-      return undefined;
-    }
-    let cancelled = false;
-    let stream;
-    let ctx;
-    let raf;
-    navigator.mediaDevices
-      .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
-      .then((mediaStream) => {
-        if (cancelled) {
-          mediaStream.getTracks().forEach((t) => t.stop());
-          return;
+
+    const elements = Array.from(document.querySelectorAll('[data-swipe-scroll="true"]'));
+    const cleanups = [];
+
+    for (const element of elements) {
+      let activePointerId = null;
+      let startX = 0;
+      let startY = 0;
+      let startScrollTop = 0;
+      let startScrollLeft = 0;
+      let moved = false;
+
+      const onPointerDown = (event) => {
+        if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+        activePointerId = event.pointerId;
+        startX = event.clientX;
+        startY = event.clientY;
+        startScrollTop = element.scrollTop;
+        startScrollLeft = element.scrollLeft;
+        moved = false;
+        element.classList.add("swipeScrollReady");
+        try {
+          element.setPointerCapture(event.pointerId);
+        } catch {
+          // Ignore capture failures on unsupported platforms.
         }
-        stream = mediaStream;
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const source = ctx.createMediaStreamSource(mediaStream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 1024;
-        analyser.smoothingTimeConstant = 0.3;
-        source.connect(analyser);
-        const data = new Uint8Array(analyser.fftSize);
-        let smoothed = 0;
-        const tick = () => {
-          analyser.getByteTimeDomainData(data);
-          let sum = 0;
-          for (let i = 0; i < data.length; i += 1) {
-            const v = (data[i] - 128) / 128;
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / data.length);
-          const norm = Math.min(1, rms * 4);
-          smoothed = smoothed * 0.85 + norm * 0.15;
-          levelRef.current = smoothed;
-          raf = requestAnimationFrame(tick);
-        };
-        tick();
-      })
-      .catch(() => {
-        // Mic permission denied or unavailable; leave level at 0.
+      };
+
+      const onPointerMove = (event) => {
+        if (event.pointerId !== activePointerId) return;
+        const deltaX = event.clientX - startX;
+        const deltaY = event.clientY - startY;
+        if (!moved && Math.abs(deltaX) < 4 && Math.abs(deltaY) < 4) return;
+
+        moved = true;
+        element.classList.add("swipeScrolling");
+        element.scrollTop = startScrollTop - deltaY;
+        element.scrollLeft = startScrollLeft - deltaX;
+        event.preventDefault();
+      };
+
+      const finishPointer = (event) => {
+        if (event.pointerId !== activePointerId) return;
+        if (moved) {
+          element.dataset.blockClickUntil = String(Date.now() + 250);
+        }
+        activePointerId = null;
+        element.classList.remove("swipeScrolling", "swipeScrollReady");
+      };
+
+      const onClickCapture = (event) => {
+        const blockUntil = Number(element.dataset.blockClickUntil || 0);
+        if (Date.now() < blockUntil) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      };
+
+      element.addEventListener("pointerdown", onPointerDown, { passive: true });
+      element.addEventListener("pointermove", onPointerMove, { passive: false });
+      element.addEventListener("pointerup", finishPointer, { passive: true });
+      element.addEventListener("pointercancel", finishPointer, { passive: true });
+      element.addEventListener("click", onClickCapture, true);
+
+      cleanups.push(() => {
+        element.removeEventListener("pointerdown", onPointerDown);
+        element.removeEventListener("pointermove", onPointerMove);
+        element.removeEventListener("pointerup", finishPointer);
+        element.removeEventListener("pointercancel", finishPointer);
+        element.removeEventListener("click", onClickCapture, true);
       });
+    }
+
     return () => {
-      cancelled = true;
-      if (raf) cancelAnimationFrame(raf);
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      if (ctx) ctx.close().catch(() => {});
+      cleanups.forEach((cleanup) => cleanup());
     };
-  }, []);
-  return levelRef;
+  }, dependencies);
 }
 
 function App() {
-  const micLevelRef = useMicLevel();
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
+  const [authSession, setAuthSession] = useState(() => loadStoredSession());
   const [rooms, setRooms] = useState([]);
   const [scenes, setScenes] = useState([]);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
@@ -112,7 +159,37 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [kioskLoginPending, setKioskLoginPending] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [restartPending, setRestartPending] = useState(false);
+  const refreshInFlightRef = useRef(null);
+
+  const token = authSession?.access_token || "";
+  const currentUser = authSession?.user || null;
+  const isAdmin = !!currentUser?.is_admin;
+
+  function storeSession(nextSession) {
+    setAuthSession(nextSession);
+    if (nextSession?.access_token) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+      localStorage.setItem(TOKEN_KEY, nextSession.access_token);
+    } else {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(TOKEN_KEY);
+    }
+  }
+
+  function clearSession(loginMessage = "Sign in again.") {
+    refreshInFlightRef.current = null;
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    setAuthSession(null);
+    setRooms([]);
+    setScenes([]);
+    setSelectedRoomId(null);
+    setNotifications([]);
+    setSettingsMessage("");
+    setLoginError(loginMessage);
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -141,7 +218,6 @@ function App() {
         setAssistantFeedback(message.payload.message, message.payload.understood ? "done" : "error");
         if (message.payload.navigate && VALID_VIEW_KEYS.has(message.payload.navigate)) {
           setActiveView(message.payload.navigate);
-          setSettingsOpen(false);
           setNotificationsOpen(false);
         }
       }
@@ -162,8 +238,7 @@ function App() {
         return response.json();
       })
       .then((data) => {
-        localStorage.setItem(TOKEN_KEY, data.access_token);
-        setToken(data.access_token);
+        storeSession(data);
       })
       .catch(() => setLoginError("Sign in on this device."))
       .finally(() => setKioskLoginPending(false));
@@ -199,6 +274,8 @@ function App() {
       candidates[0]
     );
   }, [visibleDevices, allDevices]);
+
+  useSwipeScroll([activeView, notificationsOpen]);
 
   async function loadSnapshot() {
     try {
@@ -294,17 +371,52 @@ function App() {
   }
 
   async function authFetch(path, options = {}) {
-    const response = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
-    });
+    const makeRequest = (accessToken) =>
+      fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` },
+      });
+
+    let response = await makeRequest(token);
+    if (response.status !== 401) return response;
+
+    const refreshedSession = await refreshSession();
+    if (!refreshedSession?.access_token) return response;
+    response = await makeRequest(refreshedSession.access_token);
     if (response.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
-      setToken("");
-      setRooms([]);
-      setLoginError("Sign in again.");
+      clearSession();
     }
     return response;
+  }
+
+  async function refreshSession() {
+    if (!authSession?.refresh_token) {
+      clearSession();
+      return null;
+    }
+    if (!refreshInFlightRef.current) {
+      refreshInFlightRef.current = fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: authSession.refresh_token }),
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("Session refresh failed");
+          }
+          const data = await response.json();
+          storeSession(data);
+          return data;
+        })
+        .catch(() => {
+          clearSession();
+          return null;
+        })
+        .finally(() => {
+          refreshInFlightRef.current = null;
+        });
+    }
+    return refreshInFlightRef.current;
   }
 
   async function handleLogin(event) {
@@ -324,22 +436,15 @@ function App() {
       return;
     }
     const data = await response.json();
-    localStorage.setItem(TOKEN_KEY, data.access_token);
-    setToken(data.access_token);
+    storeSession(data);
+    setSettingsMessage("");
   }
 
   function logout() {
-    localStorage.removeItem(TOKEN_KEY);
-    setToken("");
-    setRooms([]);
-    setScenes([]);
-    setSelectedRoomId(null);
-    setSettingsOpen(false);
-    setNotifications([]);
+    clearSession("");
   }
 
   function hardRefresh() {
-    setSettingsOpen(false);
     try {
       if (window.caches && typeof window.caches.keys === "function") {
         window.caches.keys().then((keys) => keys.forEach((k) => window.caches.delete(k)));
@@ -353,19 +458,12 @@ function App() {
   }
 
   function onNavSelect(item) {
-    if (item.action === "settings") {
-      setNotificationsOpen(false);
-      setSettingsOpen((open) => !open);
-      return;
-    }
     if (item.disabled) return;
     setActiveView(item.key);
-    setSettingsOpen(false);
     setNotificationsOpen(false);
   }
 
   function toggleNotifications() {
-    setSettingsOpen(false);
     setNotificationsOpen((open) => !open);
   }
 
@@ -373,13 +471,28 @@ function App() {
     setNotifications([]);
   }
 
-  const aurora = <AuroraBackground audioLevelRef={micLevelRef} />;
+  async function restartRaspberryPi() {
+    if (!window.confirm("Restart the Raspberry Pi now?")) return;
+    setRestartPending(true);
+    setSettingsMessage("");
+    const response = await authFetch("/api/admin/system/restart", { method: "POST" });
+    setRestartPending(false);
+    if (!response.ok) {
+      await showApiError(response, "Could not restart Raspberry Pi");
+      setSettingsMessage("Could not restart Raspberry Pi.");
+      return;
+    }
+    const data = await response.json();
+    setSettingsMessage(data.detail);
+    pushNotification("Raspberry Pi restart requested", "warn");
+    window.setTimeout(() => loadHealth(), 4000);
+  }
 
   if (!token) {
     if (kioskLoginPending) {
       return (
         <>
-          {aurora}
+          <AnimatedBackdrop />
           <main className="loginShell">
             <div className="loginPanel">
               <p className="eyebrow">Vokrr</p>
@@ -392,7 +505,7 @@ function App() {
     }
     return (
       <>
-        {aurora}
+        <AnimatedBackdrop />
         <LoginScreen error={loginError} onLogin={handleLogin} />
       </>
     );
@@ -400,14 +513,13 @@ function App() {
 
   return (
     <>
-    {aurora}
+    <AnimatedBackdrop />
     <main className="shell">
       <Sidebar
         activeView={activeView}
         onSelect={onNavSelect}
-        settingsOpen={settingsOpen}
-        onHardRefresh={hardRefresh}
-        onLogout={logout}
+        currentUser={currentUser}
+        isAdmin={isAdmin}
       />
       <section className="workspace">
         <Header
@@ -461,81 +573,73 @@ function App() {
             assistantDisplay={assistantDisplay}
           />
         )}
+
+        {activeView === "Settings" && (
+          <SettingsView
+            currentUser={currentUser}
+            isAdmin={isAdmin}
+            health={health}
+            healthError={healthError}
+            settingsMessage={settingsMessage}
+            restartPending={restartPending}
+            onRestart={restartRaspberryPi}
+            onHardRefresh={hardRefresh}
+            onLogout={logout}
+          />
+        )}
       </section>
     </main>
     </>
   );
 }
 
-function AuroraBackground({ audioLevelRef }) {
+function AnimatedBackdrop() {
   return (
     <div className="auroraBackground" aria-hidden="true">
-      <SoftAurora
-        speed={1}
-        scale={1.5}
-        brightness={1}
-        color1="#f7f7f7"
-        color2="#e100ff"
-        noiseFrequency={2}
-        noiseAmplitude={2}
-        bandHeight={0.5}
-        bandSpread={1}
-        octaveDecay={0.1}
-        layerOffset={0}
-        colorSpeed={1}
-        enableMouseInteraction={false}
-        mouseInfluence={0.25}
-        audioLevelRef={audioLevelRef}
-      />
+      <div className="backdropMesh backdropMeshA" />
+      <div className="backdropMesh backdropMeshB" />
+      <div className="backdropMesh backdropMeshC" />
     </div>
   );
 }
 
-function Sidebar({ activeView, onSelect, settingsOpen, onHardRefresh, onLogout }) {
+function Sidebar({
+  activeView,
+  onSelect,
+  currentUser,
+}) {
   return (
     <aside className="sidebar" aria-label="Primary">
       <div className="brand">
-        <div className="brandMark"><Icon name="logo" /></div>
+        <div className="brandMark">
+          <img src="/vokrr-icon-square.svg" alt="Vokrr" className="brandLogoImage" />
+        </div>
         <span>Vokrr</span>
       </div>
       <nav className="sideNav">
         {NAV_ITEMS.map((item) => {
-          const active = activeView === item.key || (item.action === "settings" && settingsOpen);
-          const isSettings = item.action === "settings";
+          const active = activeView === item.key;
           return (
-            <div key={item.key} className={`sideNavSlot ${isSettings && settingsOpen ? "open" : ""}`}>
+            <div key={item.key} className="sideNavSlot">
               <button
                 className={`sideNavItem ${active ? "active" : ""}`}
                 onClick={() => onSelect(item)}
                 type="button"
                 disabled={item.disabled}
-                aria-expanded={isSettings ? settingsOpen : undefined}
               >
                 {active && <span className="activeRail" aria-hidden="true" />}
                 <Icon name={item.icon} />
                 <span>{item.label}</span>
-                {isSettings && (
-                  <span className={`caret ${settingsOpen ? "open" : ""}`} aria-hidden="true">
-                    <Icon name="chevron" />
-                  </span>
-                )}
               </button>
-              {isSettings && settingsOpen && (
-                <div className="settingsMenu" role="menu">
-                  <button type="button" role="menuitem" onClick={onHardRefresh}>
-                    <Icon name="refresh" />
-                    <span>Hard refresh</span>
-                  </button>
-                  <button type="button" role="menuitem" onClick={onLogout}>
-                    <Icon name="logout" />
-                    <span>Sign out</span>
-                  </button>
-                </div>
-              )}
             </div>
           );
         })}
       </nav>
+      <div className="sidebarSession">
+        <p className="settingsLabel">Signed in</p>
+        <strong>{currentUser?.username || "Authenticated user"}</strong>
+        {currentUser?.is_admin && <span className="settingsBadge">Admin</span>}
+      </div>
     </aside>
   );
 }
@@ -558,7 +662,7 @@ function Header({
       ? "Online"
       : health
         ? "HA offline"
-        : "…";
+        : "...";
   const unreadCount = notifications.length;
   const jarvisLabel = JARVIS_STATUS_LABELS[assistantStatus] ?? assistantStatus;
   const showTranscript = Boolean(assistantDisplay) && assistantStatus !== "idle";
@@ -603,7 +707,7 @@ function Header({
                   Clear
                 </button>
               </div>
-              <ul className="notifList">
+              <ul className="notifList" data-swipe-scroll="true">
                 {notifications.length === 0 && <li className="notifEmpty">No notifications yet.</li>}
                 {notifications.map((entry) => (
                   <li key={entry.id} className={`notifItem ${entry.level}`}>
@@ -641,7 +745,7 @@ function formatRelative(timestamp) {
 function RoomTabs({ rooms, selectedRoom, onSelect, onAddDevice }) {
   return (
     <nav className="roomTabs" aria-label="Rooms">
-      <div className="roomTabsInner">
+      <div className="roomTabsInner" data-swipe-scroll="true">
         {rooms.map((room) => {
           const active = room.id === selectedRoom?.id;
           return (
@@ -677,7 +781,7 @@ function DashboardView({
   onSet,
 }) {
   return (
-    <div className="dashboard">
+    <div className="dashboard scrollSurface" data-swipe-scroll="true">
       <RoomTabs rooms={rooms} selectedRoom={selectedRoom} onSelect={onSelectRoom} />
 
       <section className="topGrid">
@@ -931,7 +1035,7 @@ function ToggleSwitch({ on, disabled, onChange }) {
 
 function DevicesView({ allDevices, onToggle, onSet }) {
   return (
-    <div className="simpleView">
+    <div className="simpleView scrollSurface" data-swipe-scroll="true">
       <div className="sectionHead">
         <h2>All Devices</h2>
         <span className="muted">{allDevices.length} total</span>
@@ -953,7 +1057,7 @@ function DevicesView({ allDevices, onToggle, onSet }) {
 
 function NewsView({ url, externalUrl }) {
   return (
-    <div className="newsView">
+    <div className="newsView scrollSurface" data-swipe-scroll="true">
       <div className="newsToolbar">
         <span className="newsEyebrow">World Monitor</span>
         <a className="newsOpen" href={externalUrl || url} target="_blank" rel="noreferrer">
@@ -974,7 +1078,7 @@ function NewsView({ url, externalUrl }) {
 
 function RoutinesView({ scenes, onRunScene }) {
   return (
-    <div className="simpleView">
+    <div className="simpleView scrollSurface" data-swipe-scroll="true">
       <div className="sectionHead">
         <h2>Routines</h2>
         <span className="muted">{scenes.length} configured</span>
@@ -996,7 +1100,7 @@ function ActivityView({ rooms, allDevices, health, healthError, assistantStatus,
   const haOk = health?.home_assistant?.ok;
   const detail = healthError || health?.home_assistant?.error || "No recent errors.";
   return (
-    <div className="simpleView">
+    <div className="simpleView scrollSurface" data-swipe-scroll="true">
       <div className="sectionHead">
         <h2>Activity</h2>
         <span className="muted caps">{haOk ? "systems online" : "needs attention"}</span>
@@ -1025,6 +1129,74 @@ function ActivityView({ rooms, allDevices, health, healthError, assistantStatus,
   );
 }
 
+function SettingsView({
+  currentUser,
+  isAdmin,
+  health,
+  healthError,
+  settingsMessage,
+  restartPending,
+  onRestart,
+  onHardRefresh,
+  onLogout,
+}) {
+  const haOk = health?.home_assistant?.ok;
+  const systemStatus = healthError
+    ? "Backend unreachable"
+    : haOk
+      ? "Backend and Home Assistant are healthy."
+      : "Backend is online but Home Assistant needs attention.";
+
+  return (
+    <div className="simpleView settingsView scrollSurface" data-swipe-scroll="true">
+      <div className="sectionHead">
+        <h2>Settings</h2>
+        <span className="muted">{isAdmin ? "admin controls" : "session controls"}</span>
+      </div>
+
+      <div className="settingsGrid">
+        <section className="settingsCard">
+          <p className="muted caps">Current login</p>
+          <h3>{currentUser?.username || "Authenticated user"}</h3>
+          <p className="muted">{isAdmin ? "Administrator access is enabled on this device." : "Standard access is active on this device."}</p>
+        </section>
+
+        <section className="settingsCard">
+          <p className="muted caps">System health</p>
+          <h3>{haOk ? "Online" : "Needs attention"}</h3>
+          <p className="muted">{systemStatus}</p>
+          {healthError && <p className="settingsAlert">{healthError}</p>}
+        </section>
+      </div>
+
+      <section className="settingsActions">
+        <button type="button" className="settingsAction primary" onClick={onHardRefresh}>
+          <Icon name="refresh" />
+          <span>Hard refresh</span>
+        </button>
+        {isAdmin && (
+          <button type="button" className="settingsAction warning" onClick={onRestart} disabled={restartPending}>
+            <Icon name="power" />
+            <span>{restartPending ? "Restarting..." : "Restart Raspberry Pi"}</span>
+          </button>
+        )}
+        <button type="button" className="settingsAction danger" onClick={onLogout}>
+          <Icon name="logout" />
+          <span>Sign out</span>
+        </button>
+      </section>
+
+      <section className="settingsCard">
+        <p className="muted caps">Next actions</p>
+        <h3>Reserved for device onboarding</h3>
+        <p className="muted">This page is where future Raspberry Pi admin actions and Home Assistant sync controls should live. User creation remains iOS-only.</p>
+      </section>
+
+      {settingsMessage && <p className="settingsNotice pageNotice">{settingsMessage}</p>}
+    </div>
+  );
+}
+
 function EmptyPanel({ text }) {
   return <div className="emptyPanel">{text}</div>;
 }
@@ -1034,7 +1206,9 @@ function LoginScreen({ error, onLogin }) {
     <main className="loginShell">
       <form className="loginPanel" onSubmit={onLogin}>
         <div className="brand">
-          <div className="brandMark"><Icon name="logo" /></div>
+          <div className="brandMark">
+            <img src="/vokrr-icon-square.svg" alt="Vokrr" className="brandLogoImage" />
+          </div>
           <span>Vokrr</span>
         </div>
         <h1>Sign In</h1>
@@ -1068,19 +1242,6 @@ function deviceIcon(type) {
 function Icon({ name }) {
   const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" };
   switch (name) {
-    case "logo":
-      return (
-        <svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
-          <defs>
-            <linearGradient id="qh-logo" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#cbb3ff" />
-              <stop offset="100%" stopColor="#8fd3ff" />
-            </linearGradient>
-          </defs>
-          <path d="M5 7.5 16 3l11 4.5v9c0 7-5.2 10.8-11 12.5-5.8-1.7-11-5.5-11-12.5z" fill="url(#qh-logo)" stroke="none" />
-          <path d="M11 15.5h10M11 12h10M11 19h6" stroke="#17121f" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-      );
     case "grid":
       return (<svg viewBox="0 0 24 24" width="20" height="20" {...s}><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>);
     case "devices":
@@ -1101,6 +1262,8 @@ function Icon({ name }) {
       return (<svg viewBox="0 0 24 24" width="14" height="14" {...s}><path d="m6 9 6 6 6-6"/></svg>);
     case "refresh":
       return (<svg viewBox="0 0 24 24" width="18" height="18" {...s}><path d="M20 11a8 8 0 1 0-2.2 5.6"/><path d="M20 4v6h-6"/></svg>);
+    case "power":
+      return (<svg viewBox="0 0 24 24" width="18" height="18" {...s}><path d="M12 3v8"/><path d="M7.2 5.8A8 8 0 1 0 16.8 5.8"/></svg>);
     case "logout":
       return (<svg viewBox="0 0 24 24" width="18" height="18" {...s}><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>);
     case "bell":

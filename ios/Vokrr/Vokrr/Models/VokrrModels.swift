@@ -129,6 +129,23 @@ struct AuthSession: Codable, Equatable {
     }
 }
 
+struct CreateUserRequest: Encodable {
+    let username: String
+    let password: String
+    let isAdmin: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case username
+        case password
+        case isAdmin = "is_admin"
+    }
+}
+
+struct SystemRestartResponse: Codable {
+    let accepted: Bool
+    let detail: String
+}
+
 struct HealthResponse: Codable {
     struct HomeAssistantStatus: Codable {
         let ok: Bool

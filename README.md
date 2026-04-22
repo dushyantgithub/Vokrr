@@ -10,10 +10,10 @@ The repository contains a working end-to-end stack:
 - **FastAPI backend** with Home Assistant REST/WebSocket client, normalized rooms/devices, device actions, scenes/routines, health checks, and a realtime WebSocket hub for the frontend.
 - **React/Vite touchscreen UI** optimized for the 1024×600 Waveshare display, featuring:
   - Glass (frosted) UI across the sidebar, header, cards, dropdowns, and the login panel (`backdrop-filter` with translucent surfaces).
-  - A full‑viewport, audio‑reactive `SoftAurora` WebGL background (React Bits `SoftAurora-JS-CSS` component + `ogl`) whose noise amplitude and band height respond live to microphone RMS.
+  - A lightweight full-viewport CSS backdrop instead of the previous WebGL aurora, to reduce GPU/CPU load on the Raspberry Pi.
   - A `Jarvis` status bar in the header showing idle/listening/processing/STT transcript states (replaces the old search bar).
   - A notifications bell with unread badge and a dropdown feed of recent events.
-  - A `Settings` entry in the sidebar that expands to reveal `Hard refresh` and `Sign out`.
+  - A `Settings` entry in the sidebar that expands to reveal `Hard refresh`, `Sign out`, and, for admin users, `Restart Raspberry Pi` plus a simple user-creation form.
   - A `News` tab that embeds [World Monitor](https://www.worldmonitor.app) inside the app via a reverse‑proxy (`/news-proxy/`) that strips `X-Frame-Options` / `Content-Security-Policy`.
 - **Voice intent service** with YAML‑driven templates (`home-assistant/config/commands.yaml`), room/device name matching (including space‑folded fuzzy matching for STT outputs like "tube light" vs. "Tubelight"), and a `navigate` action that tells the UI which view to switch to.
 - **Config‑driven room/device mapping** in `home-assistant/config/devices.yaml`.
@@ -47,6 +47,15 @@ Open:
 
 Use the Vokrr bootstrap admin credentials from `.env` to sign in initially. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
 
+To make the stack and kiosk come back automatically after a Raspberry Pi reboot, install and enable the bundled systemd units:
+
+```bash
+sudo cp infra/systemd/vokrr-stack.service /etc/systemd/system/
+sudo cp infra/systemd/vokrr-kiosk.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now vokrr-stack.service vokrr-kiosk.service
+```
+
 ## Remote Access
 
 The recommended remote-access path is Cloudflare Tunnel, not direct router exposure. This is especially important on CGNAT-backed ISPs where port forwarding cannot work reliably.
@@ -67,7 +76,7 @@ The frontend is a single-page Vite build served by nginx:
   - `/news-proxy/*` → reverse proxy to `https://www.worldmonitor.app/` with response headers `X-Frame-Options`, `Content-Security-Policy`, `Strict-Transport-Security`, and the X-Origin policies stripped, plus `sub_filter` rules that rewrite absolute upstream URLs back to same-origin paths and neutralise the injected `<meta http-equiv="Content-Security-Policy">` tag.
   - `/assets/*`, `/favico/*`, `/_next/*`, `/api/*`, and other common root-relative paths used by the News upstream → forwarded to the same upstream so the embedded page can resolve its assets and XHR calls through the iframe's origin.
 
-The `SoftAurora` background component lives in `frontend/src/components/SoftAurora/` (shadcn-style in-tree copy of the React Bits registry item). It accepts an `audioLevelRef` prop; a `useMicLevel()` hook in `main.jsx` wires up `navigator.mediaDevices.getUserMedia` → `AudioContext.AnalyserNode` and exposes a smoothed RMS level via a ref. The shader modulates `uNoiseAmp`, `uNoiseFreq`, `uBandHeight`, and `uBandSpread` each frame based on that level, so the aurora reacts to voice while keeping the WebGL context stable.
+The background is now a pure CSS layered backdrop rather than a WebGL canvas so the kiosk can stay responsive on the Raspberry Pi while preserving the same dark/glass visual language.
 
 ## Voice Commands
 
@@ -137,6 +146,7 @@ All endpoints sit under `/api/` on port 8080. Authenticated ones require a Beare
 | POST | `/api/auth/kiosk` | Localhost-only auto-login for the kiosk display. |
 | POST | `/api/auth/register` | Optional self-registration when enabled with a registration code. |
 | POST | `/api/admin/users` | Admin-only user creation endpoint. |
+| POST | `/api/admin/system/restart` | Admin-only Raspberry Pi restart trigger. |
 | GET  | `/api/admin/activity` | Admin-only audit log of auth and control actions. |
 | GET  | `/api/system/health` | Backend + Home Assistant reachability. |
 | GET  | `/api/ha/entities` | Raw Home Assistant entity list (for device mapping). |

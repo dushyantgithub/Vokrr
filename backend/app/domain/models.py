@@ -119,6 +119,11 @@ class CreateUserRequest(BaseModel):
     is_admin: bool = False
 
 
+class SystemRestartResponse(BaseModel):
+    accepted: bool = True
+    detail: str
+
+
 class ActivityLogEntry(BaseModel):
     id: int
     user_id: str | None = None

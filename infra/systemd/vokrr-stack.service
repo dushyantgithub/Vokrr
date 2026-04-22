@@ -1,0 +1,16 @@
+[Unit]
+Description=Vokrr Docker stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=quantum-hive
+WorkingDirectory=/home/quantum-hive/Projects/vokrr
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker compose -f /home/quantum-hive/Projects/vokrr/infra/docker-compose.yml up -d --build
+ExecStop=/usr/bin/docker compose -f /home/quantum-hive/Projects/vokrr/infra/docker-compose.yml down
+
+[Install]
+WantedBy=multi-user.target

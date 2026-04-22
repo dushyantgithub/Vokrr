@@ -24,6 +24,16 @@ xcodebuild -project ios/Vokrr/Vokrr.xcodeproj \
   build
 ```
 
+If you want to install the app on a physical iPhone, do it from Xcode on a Mac:
+
+1. Open `ios/Vokrr/Vokrr.xcodeproj`.
+2. Select the `Vokrr` scheme and choose your iPhone as the run destination.
+3. Set your Apple Developer Team under `Signing & Capabilities`.
+4. If Xcode asks, allow it to create/update the provisioning profile.
+5. Connect the iPhone by cable the first time and tap `Trust` on the device if prompted.
+6. Press `Run` in Xcode to build and install the app.
+7. On the phone, if iOS blocks the app the first time, open `Settings > General > VPN & Device Management`, trust your developer certificate, and launch again.
+
 ## Test On iPhone
 
 1. Open `ios/Vokrr/Vokrr.xcodeproj` in Xcode.
@@ -37,6 +47,8 @@ xcodebuild -project ios/Vokrr/Vokrr.xcodeproj \
    - Device toggles work.
    - Room power actions work.
    - Routines execute.
+   - Session survives app relaunch and backend restarts without forcing a fresh login.
+   - Admin-only Settings actions can create users and trigger a Raspberry Pi restart.
    - Realtime updates reconnect after backgrounding the app.
    - Signing out clears the local session.
 

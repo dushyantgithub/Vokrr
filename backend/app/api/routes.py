@@ -16,6 +16,7 @@ from app.domain.models import (
     RoomSetRequest,
     Scene,
     SceneRunResponse,
+    SystemRestartResponse,
     VoiceCommandRequest,
     VoiceCommandResponse,
     VoiceEventRequest,
@@ -107,6 +108,16 @@ async def admin_activity(
     auth: AuthService = Depends(get_auth_service),
 ) -> list[ActivityLogEntry]:
     return [ActivityLogEntry(**entry) for entry in auth.recent_activity(actor, limit=limit)]
+
+
+@router.post("/api/admin/system/restart", response_model=SystemRestartResponse)
+async def restart_system(
+    request: Request,
+    actor: AuthenticatedUser = Depends(require_admin),
+    auth: AuthService = Depends(get_auth_service),
+) -> SystemRestartResponse:
+    auth.restart_system(actor, request)
+    return SystemRestartResponse(detail="Raspberry Pi restart requested")
 
 
 @router.post("/api/auth/kiosk", response_model=AuthSessionResponse)

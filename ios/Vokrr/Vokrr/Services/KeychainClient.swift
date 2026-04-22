@@ -1,18 +1,12 @@
 import Foundation
 import Security
 
-private struct StoredSession: Codable {
-    let accessToken: String
-    let refreshToken: String
-}
-
 final class KeychainClient {
     private let service = "Vokrr.iOS"
     private let tokenKey = "authSession"
 
-    func saveSession(accessToken: String, refreshToken: String) {
-        let payload = StoredSession(accessToken: accessToken, refreshToken: refreshToken)
-        guard let data = try? JSONEncoder().encode(payload) else { return }
+    func saveSession(_ session: AuthSession) {
+        guard let data = try? JSONEncoder().encode(session) else { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -23,7 +17,7 @@ final class KeychainClient {
         SecItemAdd(query as CFDictionary, nil)
     }
 
-    func loadSession() -> (accessToken: String, refreshToken: String)? {
+    func loadSession() -> AuthSession? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -36,11 +30,17 @@ final class KeychainClient {
         guard status == errSecSuccess, let data = result as? Data else {
             return nil
         }
-        if let decoded = try? JSONDecoder().decode(StoredSession.self, from: data) {
-            return (decoded.accessToken, decoded.refreshToken)
+        if let decoded = try? JSONDecoder().decode(AuthSession.self, from: data) {
+            return decoded
         }
         if let token = String(data: data, encoding: .utf8) {
-            return (token, "")
+            return AuthSession(
+                accessToken: token,
+                refreshToken: "",
+                tokenType: "Bearer",
+                expiresIn: 0,
+                user: SessionUser(id: "", username: "admin", isAdmin: false)
+            )
         }
         return nil
     }

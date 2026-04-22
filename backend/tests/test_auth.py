@@ -90,3 +90,17 @@ def test_recent_activity_contains_auth_events(tmp_path: Path) -> None:
 
     assert activity
     assert {entry["action"] for entry in activity} >= {"auth.login", "auth.refresh"}
+
+
+def test_admin_can_create_user(tmp_path: Path) -> None:
+    service = AuthService(build_settings(tmp_path))
+    service.ensure_bootstrap_admin()
+
+    session = service.login("owner", "very-secure-bootstrap", request=None)
+    actor = service.verify_access_token(session["access_token"])
+
+    created = service.create_user("viewer", "very-secure-password", False, actor, request=None)
+
+    assert created.username == "viewer"
+    assert created.is_admin is False
+    assert service.repo.get_user_by_username("viewer") is not None

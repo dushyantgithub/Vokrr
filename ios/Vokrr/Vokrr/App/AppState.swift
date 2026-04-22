@@ -13,6 +13,7 @@ final class AppState: ObservableObject {
     @Published var health: HealthResponse?
     @Published var loginError = ""
     @Published var bannerMessage = ""
+    @Published var settingsMessage = ""
     @Published var notifications: [NotificationItem] = []
     @Published var selectedTab: VokrrTab = .dashboard
     @Published var selectedRoomID: String?
@@ -21,6 +22,8 @@ final class AppState: ObservableObject {
     @Published var jarvisMessage = "Say “Jarvis” to start"
     @Published var isRealtimeConnected = false
     @Published var isBusy = false
+    @Published var isCreatingUser = false
+    @Published var isRestartingSystem = false
 
     let networkMonitor = NetworkMonitor()
 
@@ -62,14 +65,8 @@ final class AppState: ObservableObject {
         if phase != .booting { return }
         if let stored = keychainClient.loadSession() {
             do {
-                let restored = AuthSession(
-                    accessToken: stored.accessToken,
-                    refreshToken: stored.refreshToken,
-                    tokenType: "Bearer",
-                    expiresIn: 0,
-                    user: SessionUser(id: "", username: username, isAdmin: false)
-                )
-                session = restored
+                session = stored
+                username = stored.user.username
                 try await loadInitialData()
                 phase = .ready
                 await connectRealtime()
@@ -242,6 +239,9 @@ final class AppState: ObservableObject {
 
     private func loadInitialData() async throws {
         async let nextHealth = apiClient.fetchHealth(baseURL: serverURL)
+        async let nextUser = withAuthorizedAccessToken { token in
+            try await apiClient.fetchCurrentUser(baseURL: serverURL, token: token)
+        }
         async let nextRooms = withAuthorizedAccessToken { token in
             try await apiClient.fetchRooms(baseURL: serverURL, token: token)
         }
@@ -250,8 +250,10 @@ final class AppState: ObservableObject {
         }
 
         health = try await nextHealth
+        let user = try await nextUser
         rooms = try await nextRooms
         scenes = try await nextScenes
+        syncSessionUser(user)
         if selectedRoomID == nil {
             selectedRoomID = rooms.first?.id
         }
@@ -304,9 +306,24 @@ final class AppState: ObservableObject {
         session = nextSession
         username = nextSession.user.username
         keychainClient.saveSession(
-            accessToken: nextSession.accessToken,
-            refreshToken: nextSession.refreshToken
+            nextSession
         )
+    }
+
+    private func syncSessionUser(_ user: SessionUser) {
+        guard let currentSession = session else { return }
+        guard currentSession.user != user else {
+            username = user.username
+            return
+        }
+        let updatedSession = AuthSession(
+            accessToken: currentSession.accessToken,
+            refreshToken: currentSession.refreshToken,
+            tokenType: currentSession.tokenType,
+            expiresIn: currentSession.expiresIn,
+            user: user
+        )
+        storeSession(updatedSession)
     }
 
     private func performLocalSignOut() {
@@ -317,7 +334,50 @@ final class AppState: ObservableObject {
         scenes = []
         selectedRoomID = nil
         notifications = []
+        settingsMessage = ""
         phase = .login
+    }
+
+    var currentUser: SessionUser? {
+        session?.user
+    }
+
+    var isAdmin: Bool {
+        currentUser?.isAdmin ?? false
+    }
+
+    func createUser(username: String, password: String, isAdmin: Bool) async {
+        self.isCreatingUser = true
+        settingsMessage = ""
+        do {
+            let created = try await withAuthorizedAccessToken { token in
+                try await apiClient.createUser(
+                    baseURL: serverURL,
+                    token: token,
+                    request: CreateUserRequest(username: username, password: password, isAdmin: isAdmin)
+                )
+            }
+            settingsMessage = "User \(created.username) created."
+            pushNotification(title: created.username, detail: "User created", level: .info)
+        } catch {
+            settingsMessage = error.localizedDescription
+        }
+        self.isCreatingUser = false
+    }
+
+    func restartSystem() async {
+        isRestartingSystem = true
+        settingsMessage = ""
+        do {
+            let response = try await withAuthorizedAccessToken { token in
+                try await apiClient.restartSystem(baseURL: serverURL, token: token)
+            }
+            settingsMessage = response.detail
+            pushNotification(title: "Raspberry Pi", detail: "Restart requested", level: .warning)
+        } catch {
+            settingsMessage = error.localizedDescription
+        }
+        isRestartingSystem = false
     }
 
     private func handleRealtimeEvent(event: String, payload: Data) {

@@ -4,6 +4,7 @@ import hmac
 import json
 import secrets
 import sqlite3
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass
@@ -468,6 +469,27 @@ class AuthService:
     def logout(self, refresh_token: str, user: AuthenticatedUser, request: Request | None) -> None:
         self.repo.revoke_refresh_token(refresh_token)
         self.record_activity("auth.logout", True, user=user, request=request)
+
+    def restart_system(self, actor: AuthenticatedUser, request: Request | None) -> None:
+        if not actor.is_admin:
+            raise HTTPException(status_code=403, detail="Admin access required")
+        try:
+            subprocess.Popen(
+                ["/bin/sh", "-lc", self.settings.system_restart_command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            self.record_activity(
+                "system.restart",
+                False,
+                user=actor,
+                request=request,
+                details={"error": str(exc)},
+            )
+            raise HTTPException(status_code=500, detail="Could not trigger Raspberry Pi restart") from exc
+        self.record_activity("system.restart", True, user=actor, request=request)
 
     def create_access_token(self, user: AuthenticatedUser) -> str:
         header = {"alg": "HS256", "typ": "JWT"}

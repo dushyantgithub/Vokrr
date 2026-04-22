@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct AuroraBackground: View {
-    @State private var animate = false
-
     var body: some View {
         ZStack {
             VokrrTheme.background
@@ -11,44 +9,28 @@ struct AuroraBackground: View {
                 .fill(VokrrTheme.lavender.opacity(0.33))
                 .frame(width: 280, height: 280)
                 .blur(radius: 60)
-                .offset(x: animate ? -120 : 90, y: animate ? -310 : -240)
+                .offset(x: 90, y: -240)
             Circle()
                 .fill(VokrrTheme.sky.opacity(0.28))
                 .frame(width: 260, height: 260)
                 .blur(radius: 70)
-                .offset(x: animate ? 140 : -80, y: animate ? -10 : 80)
+                .offset(x: -80, y: 80)
             Circle()
                 .fill(Color.white.opacity(0.14))
                 .frame(width: 180, height: 180)
                 .blur(radius: 40)
-                .offset(x: animate ? 120 : -40, y: animate ? 220 : 180)
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 8).repeatForever(autoreverses: true)) {
-                animate = true
-            }
+                .offset(x: -40, y: 180)
         }
     }
 }
 
 struct VokrrLogo: View {
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(VokrrTheme.gradient)
-            VStack(alignment: .leading, spacing: 3) {
-                Capsule()
-                    .fill(Color.black.opacity(0.8))
-                    .frame(width: 24, height: 3)
-                Capsule()
-                    .fill(Color.black.opacity(0.8))
-                    .frame(width: 24, height: 3)
-                Capsule()
-                    .fill(Color.black.opacity(0.8))
-                    .frame(width: 14, height: 3)
-            }
-        }
-        .frame(width: 36, height: 36)
+        Image("VokrrMark")
+            .resizable()
+            .interpolation(.high)
+            .frame(width: 36, height: 36)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

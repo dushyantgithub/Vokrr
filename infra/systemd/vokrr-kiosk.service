@@ -1,7 +1,7 @@
 [Unit]
 Description=Vokrr touchscreen kiosk
-After=network-online.target docker.service
-Wants=network-online.target
+After=network-online.target docker.service vokrr-stack.service
+Wants=network-online.target vokrr-stack.service
 
 [Service]
 User=quantum-hive
