@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     await state.state_sync.stop()
 
 
-app = FastAPI(title="Quantum Home Backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Vokrr Backend", version="0.1.0", lifespan=lifespan)
 
 settings = get_settings()
 app.add_middleware(

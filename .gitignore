@@ -9,6 +9,7 @@ __pycache__/
 node_modules/
 dist/
 build/
+*.egg-info/
 *.pyc
 *.sqlite3
 *.db
@@ -17,6 +18,7 @@ home-assistant/config/.storage/
 home-assistant/config/home-assistant_v2.db*
 home-assistant/config/home-assistant.log*
 home-assistant/config/secrets.yaml
+home-assistant/config/.ha_run.lock
 voice-pipeline/models/
 infra/env/*.env
 !infra/env/*.env.example

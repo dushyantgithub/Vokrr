@@ -12,11 +12,11 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    app_name: str = "Quantum Home"
+    app_name: str = "Vokrr"
     backend_host: str = "0.0.0.0"
     backend_port: int = 8080
     backend_cors_origins: str = Field(
-        default="http://localhost:5173,http://localhost:3000,http://quantum-home.local:3000"
+        default="http://localhost:5173,http://localhost:3000,http://vokrr.local:3000"
     )
     home_assistant_url: AnyHttpUrl = "http://localhost:8123"
     home_assistant_token: str = ""

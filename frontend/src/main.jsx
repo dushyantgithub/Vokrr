@@ -7,7 +7,7 @@ const API_BASE =
   window.location.port === "3000" || window.location.port === "5173"
     ? `${window.location.protocol}//${window.location.hostname}:8080`
     : "";
-const TOKEN_KEY = "quantum_home_token";
+const TOKEN_KEY = "vokrr_token";
 const KIOSK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 const NAV_ITEMS = [
@@ -382,7 +382,7 @@ function App() {
           {aurora}
           <main className="loginShell">
             <div className="loginPanel">
-              <p className="eyebrow">Quantum Home</p>
+              <p className="eyebrow">Vokrr</p>
               <h1>Starting</h1>
               <p className="loginHint">Opening the base app.</p>
             </div>
@@ -496,7 +496,7 @@ function Sidebar({ activeView, onSelect, settingsOpen, onHardRefresh, onLogout }
     <aside className="sidebar" aria-label="Primary">
       <div className="brand">
         <div className="brandMark"><Icon name="logo" /></div>
-        <span>Quantum Home</span>
+        <span>Vokrr</span>
       </div>
       <nav className="sideNav">
         {NAV_ITEMS.map((item) => {
@@ -1035,7 +1035,7 @@ function LoginScreen({ error, onLogin }) {
       <form className="loginPanel" onSubmit={onLogin}>
         <div className="brand">
           <div className="brandMark"><Icon name="logo" /></div>
-          <span>Quantum Home</span>
+          <span>Vokrr</span>
         </div>
         <h1>Sign In</h1>
         <label>

@@ -1,11 +1,11 @@
-# Quantum Home iOS App
+# Vokrr iOS App
 
-The native iOS client lives in `ios/QuantumHome/`.
+The native iOS client lives in `ios/Vokrr/`.
 
 ## What It Includes
 
 - SwiftUI iPhone app targeting iOS 16+.
-- Login flow backed by the public Quantum Home backend over HTTPS.
+- Login flow backed by the public Vokrr backend over HTTPS.
 - Short-lived JWT access tokens plus refresh-token rotation.
 - Default server address generated from `IOS_DEFAULT_SERVER_URL`.
 - Live room, device, routine, activity, news, and settings views.
@@ -18,16 +18,16 @@ The iOS app should talk only to your backend hostname, for example `https://api.
 
 ```bash
 python3 scripts/generate_ios_project.py
-xcodebuild -project ios/QuantumHome/QuantumHome.xcodeproj \
-  -scheme QuantumHome \
+xcodebuild -project ios/Vokrr/Vokrr.xcodeproj \
+  -scheme Vokrr \
   -destination 'platform=iOS Simulator,name=iPhone 16e' \
   build
 ```
 
 ## Test On iPhone
 
-1. Open `ios/QuantumHome/QuantumHome.xcodeproj` in Xcode.
-2. Select the `QuantumHome` scheme.
+1. Open `ios/Vokrr/Vokrr.xcodeproj` in Xcode.
+2. Select the `Vokrr` scheme.
 3. Choose your iPhone as the run destination.
 4. Set your Apple Developer Team in `Signing & Capabilities`.
 5. In the app login screen, set the server to your public backend URL such as `https://api.vokrr.com`.

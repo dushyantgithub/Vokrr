@@ -8,7 +8,7 @@ Build a custom smart home control system with:
 4. Voice control using wake word + commands
 5. A local backend that sits between my UI/voice system and Home Assistant
 6. A fully local-first architecture
-7. Local-network access through the Quantum Home app with username/password authentication
+7. Local-network access through the Vokrr app with username/password authentication
 
 The current scope is ONLY:
 - Fresh Raspberry Pi setup from scratch
@@ -54,7 +54,7 @@ HIGH LEVEL ARCHITECTURE
   - Speech-to-text service
   - Text-to-speech service
 - Touch UI flow
-  - user signs into Quantum Home app locally
+  - user signs into Vokrr app locally
   - user touches UI on Raspberry Pi display
   - frontend calls backend
   - backend calls Home Assistant APIs
@@ -62,7 +62,7 @@ HIGH LEVEL ARCHITECTURE
 - iOS flow
   - user opens iOS app
   - user enters server address or uses local discovery
-  - user signs in with Quantum Home app username/password
+  - user signs in with Vokrr app username/password
   - app stores token securely
   - app loads rooms/devices from backend
   - app controls devices through backend APIs
@@ -92,7 +92,7 @@ Do not hardcode only one brand. Build a generic abstraction around:
 
 USER EXPERIENCE
 1. Touchscreen UI on Raspberry Pi
-   - login screen using Quantum Home username/password
+   - login screen using Vokrr username/password
    - fullscreen kiosk-style app
    - custom modern UI
    - room browsing
@@ -248,7 +248,7 @@ PHASE 4 — TOUCHSCREEN FRONTEND
 Build a custom touchscreen UI using React + Vite.
 
 Requirements:
-- login screen using the Quantum Home app username/password
+- login screen using the Vokrr app username/password
 - fullscreen kiosk-friendly layout
 - optimized for Raspberry Pi attached display
 - simple, fast, touch-friendly
@@ -279,7 +279,7 @@ Deliverables:
 - recommendation for browser/kiosk setup on Pi
 
 PHASE 4.5 — IOS APP
-Build a native iOS client for the local Quantum Home backend.
+Build a native iOS client for the local Vokrr backend.
 
 Requirements:
 - first-launch login
@@ -298,7 +298,7 @@ Deliverables:
 - auth/session manager
 - room/device models
 - SwiftUI screens
-- setup instructions for connecting to `http://quantum-home.local:8080`
+- setup instructions for connecting to `http://vokrr.local:8080`
 
 PHASE 5 — VOICE CONTROL PIPELINE
 Implement the custom voice path:

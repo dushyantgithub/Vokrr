@@ -26,7 +26,7 @@ Do not put Home Assistant on a public hostname.
 In the Cloudflare Zero Trust dashboard:
 
 1. Go to `Networks` -> `Tunnels`.
-2. Create a new `Cloudflared` tunnel named `quantum-home`.
+2. Create a new `Cloudflared` tunnel named `vokrr`.
 3. Add a public hostname:
    - Hostname: `api`
    - Domain: `vokrr.com`

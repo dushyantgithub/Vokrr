@@ -1,9 +1,9 @@
-name: quantum-home
+name: vokrr
 
 services:
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
-    container_name: quantum-home-ha
+    container_name: vokrr-ha
     restart: unless-stopped
     privileged: true
     network_mode: host
@@ -17,7 +17,7 @@ services:
   backend:
     build:
       context: ../backend
-    container_name: quantum-home-backend
+    container_name: vokrr-backend
     restart: unless-stopped
     network_mode: host
     env_file:
@@ -35,7 +35,7 @@ services:
   frontend:
     build:
       context: ../frontend
-    container_name: quantum-home-frontend
+    container_name: vokrr-frontend
     restart: unless-stopped
     ports:
       - "3000:80"
@@ -45,7 +45,7 @@ services:
   voice-intent:
     build:
       context: ../voice-pipeline/intent
-    container_name: quantum-home-voice-intent
+    container_name: vokrr-voice-intent
     restart: unless-stopped
     network_mode: host
     env_file:
@@ -56,7 +56,7 @@ services:
   voice-listener:
     build:
       context: ../voice-pipeline/listener
-    container_name: quantum-home-voice-listener
+    container_name: vokrr-voice-listener
     restart: unless-stopped
     network_mode: host
     privileged: true
@@ -73,7 +73,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: quantum-home-cloudflared
+    container_name: vokrr-cloudflared
     restart: unless-stopped
     profiles:
       - cloudflare

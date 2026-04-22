@@ -1,5 +1,5 @@
 [project]
-name = "quantum-home-voice-intent"
+name = "vokrr-voice-intent"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [

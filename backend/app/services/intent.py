@@ -225,7 +225,7 @@ def compile_template(template: str) -> re.Pattern[str]:
 _FILLER_PREFIX_PATTERN = re.compile(
     r"^(?:"
     r"(?:hey|ok|okay|hi|hello|please|could you|can you|would you|"
-    r"jarvis|hive|quantum(?: home)?)"
+    r"jarvis|hive|vokrr|quantum(?: home)?)"
     r"[,\s]+)+"
 )
 

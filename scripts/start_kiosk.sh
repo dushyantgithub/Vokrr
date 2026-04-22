@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_URL="${QUANTUM_HOME_KIOSK_URL:-http://localhost:3000}"
-PROFILE_DIR="${QUANTUM_HOME_KIOSK_PROFILE:-$HOME/.config/quantum-home-kiosk}"
-HEALTH_URL="${QUANTUM_HOME_KIOSK_HEALTH_URL:-http://localhost:8080/api/system/health}"
-STARTUP_TIMEOUT="${QUANTUM_HOME_KIOSK_STARTUP_TIMEOUT:-180}"
+APP_URL="${VOKRR_KIOSK_URL:-http://localhost:3000}"
+PROFILE_DIR="${VOKRR_KIOSK_PROFILE:-$HOME/.config/vokrr-kiosk}"
+HEALTH_URL="${VOKRR_KIOSK_HEALTH_URL:-http://localhost:8080/api/system/health}"
+STARTUP_TIMEOUT="${VOKRR_KIOSK_STARTUP_TIMEOUT:-180}"
 
 mkdir -p "${PROFILE_DIR}"
 
-pkill -u "$USER" -f "chromium.*quantum-home-kiosk" 2>/dev/null || true
+pkill -u "$USER" -f "chromium.*vokrr-kiosk" 2>/dev/null || true
 pkill -u "$USER" -f "chromium.*${APP_URL}" 2>/dev/null || true
 
 # Wait for the backend (and, transitively, Home Assistant) to be healthy before

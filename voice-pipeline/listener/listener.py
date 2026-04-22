@@ -35,7 +35,7 @@ ASSIST_PROMPTS = [
     "Ready for your command.",
 ]
 
-app = FastAPI(title="Quantum Home Voice Listener", version="0.1.0")
+app = FastAPI(title="Vokrr Voice Listener", version="0.1.0")
 logger = logging.getLogger(__name__)
 
 audio_queue: queue.Queue[bytes] = queue.Queue()

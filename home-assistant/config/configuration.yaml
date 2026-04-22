@@ -1,7 +1,7 @@
 default_config:
 
 homeassistant:
-  name: Quantum Home
+  name: Vokrr
   unit_system: metric
   time_zone: Europe/London
   country: GB

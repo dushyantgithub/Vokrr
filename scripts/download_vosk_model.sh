@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODEL_URL="${MODEL_URL:-https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip}"
-MODEL_DIR="${MODEL_DIR:-/home/quantum-hive/Projects/quantum-home/voice-pipeline/models}"
+MODEL_DIR="${MODEL_DIR:-/home/quantum-hive/Projects/vokrr/voice-pipeline/models}"
 TARGET_DIR="${MODEL_DIR}/vosk"
 TMP_ZIP="/tmp/vosk-model.zip"
 

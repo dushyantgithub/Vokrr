@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 
-PROJECT_NAME = "QuantumHome"
-IOS_ROOT = Path("ios/QuantumHome")
+PROJECT_NAME = "Vokrr"
+IOS_ROOT = Path("ios/Vokrr")
 APP_ROOT = IOS_ROOT / PROJECT_NAME
 PROJECT_DIR = IOS_ROOT / f"{PROJECT_NAME}.xcodeproj"
 WORKSPACE_DIR = PROJECT_DIR / "project.xcworkspace"
@@ -131,7 +131,7 @@ def resolve_comment(object_id: str, file_refs: dict[Path, str], files: list[Path
 
 def generate_project() -> None:
     generate_app_environment()
-    default_server_url = load_env_value("IOS_DEFAULT_SERVER_URL", "https://api.quantum-home.example")
+    default_server_url = load_env_value("IOS_DEFAULT_SERVER_URL", "https://api.vokrr.com")
     files = collect_project_files(APP_ROOT)
     ids = IDPool()
 
@@ -368,7 +368,7 @@ def generate_project() -> None:
 \t\t\t\t\t"@executable_path/Frameworks",
 \t\t\t\t);
 \t\t\t\tMARKETING_VERSION = 1.0;
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.quantumhome.ios;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.vokrr.ios;
 \t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
 \t\t\t\tSUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 \t\t\t\tSUPPORTED_INTERFACE_ORIENTATIONS = UIInterfaceOrientationPortrait;
@@ -394,7 +394,7 @@ def generate_project() -> None:
 \t\t\t\t\t"@executable_path/Frameworks",
 \t\t\t\t);
 \t\t\t\tMARKETING_VERSION = 1.0;
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.quantumhome.ios;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.vokrr.ios;
 \t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
 \t\t\t\tSUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 \t\t\t\tSUPPORTED_INTERFACE_ORIENTATIONS = UIInterfaceOrientationPortrait;
@@ -475,8 +475,8 @@ def generate_app_environment() -> None:
         '''import Foundation
 
 enum AppEnvironment {
-    static let defaultServerURL = Bundle.main.object(forInfoDictionaryKey: "QuantumHomeDefaultServerURL") as? String
-        ?? "https://api.quantum-home.example"
+    static let defaultServerURL = Bundle.main.object(forInfoDictionaryKey: "VokrrDefaultServerURL") as? String
+        ?? "https://api.vokrr.com"
 }
 '''
     )

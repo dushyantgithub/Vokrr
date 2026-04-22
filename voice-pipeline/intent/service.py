@@ -9,7 +9,7 @@ BACKEND_URL = os.getenv("VOICE_BACKEND_URL", "http://backend:8080").rstrip("/")
 APP_USERNAME = os.getenv("APP_BOOTSTRAP_ADMIN_USERNAME") or os.getenv("APP_USERNAME", "admin")
 APP_PASSWORD = os.getenv("APP_BOOTSTRAP_ADMIN_PASSWORD") or os.getenv("APP_PASSWORD", "")
 
-app = FastAPI(title="Quantum Home Voice Intent Bridge", version="0.1.0")
+app = FastAPI(title="Vokrr Voice Intent Bridge", version="0.1.0")
 _token: str | None = None
 _token_time = 0.0
 

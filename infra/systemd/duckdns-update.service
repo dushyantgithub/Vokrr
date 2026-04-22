@@ -1,10 +1,10 @@
 [Unit]
-Description=Update DuckDNS record for Quantum Home
+Description=Update DuckDNS record for Vokrr
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 User=quantum-hive
-WorkingDirectory=/home/quantum-hive/Projects/quantum-home
-ExecStart=/home/quantum-hive/Projects/quantum-home/scripts/update_duckdns.sh
+WorkingDirectory=/home/quantum-hive/Projects/vokrr
+ExecStart=/home/quantum-hive/Projects/vokrr/scripts/update_duckdns.sh

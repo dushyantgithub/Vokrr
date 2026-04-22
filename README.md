@@ -1,4 +1,4 @@
-# Quantum Home
+# Vokrr
 
 Local-first smart home control system for Raspberry Pi 4/5 with Home Assistant as the integration engine, a custom FastAPI backend, a React/Vite touchscreen UI with a glass (iOS-style) aesthetic, and a local voice command pipeline.
 
@@ -22,14 +22,14 @@ The repository contains a working end-to-end stack:
 ## Quick Start On The Pi
 
 ```bash
-cd ~/Projects/quantum-home
+cd ~/Projects/vokrr
 cp .env.example .env
 ```
 
 Edit `.env` and set:
 
 - `HOME_ASSISTANT_TOKEN` after creating a long-lived access token in Home Assistant.
-- `APP_BOOTSTRAP_ADMIN_USERNAME`, `APP_BOOTSTRAP_ADMIN_PASSWORD`, and `APP_AUTH_SECRET` for the initial Quantum Home admin account.
+- `APP_BOOTSTRAP_ADMIN_USERNAME`, `APP_BOOTSTRAP_ADMIN_PASSWORD`, and `APP_AUTH_SECRET` for the initial Vokrr admin account.
 
 Keep `HOME_ASSISTANT_URL=http://localhost:8123` for the Docker Compose stack because the backend runs on host networking.
 
@@ -41,11 +41,11 @@ docker compose -f infra/docker-compose.yml up -d --build
 
 Open:
 
-- Home Assistant: `http://quantum-home.local:8123`
-- Quantum Home UI: `http://quantum-home.local:3000`
-- Backend API docs: `http://quantum-home.local:8080/docs`
+- Home Assistant: `http://vokrr.local:8123`
+- Vokrr UI: `http://vokrr.local:3000`
+- Backend API docs: `http://vokrr.local:8080/docs`
 
-Use the Quantum Home bootstrap admin credentials from `.env` to sign in initially. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
+Use the Vokrr bootstrap admin credentials from `.env` to sign in initially. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
 
 ## Remote Access
 
@@ -114,12 +114,12 @@ The Vite dev server proxies `/api` and `/ws` to `http://localhost:8080`. The `/n
 
 ## Device Mapping
 
-Home Assistant discovers the real entities. Quantum Home maps those entity IDs to stable rooms/devices in `home-assistant/config/devices.yaml`.
+Home Assistant discovers the real entities. Vokrr maps those entity IDs to stable rooms/devices in `home-assistant/config/devices.yaml`.
 
 Use the backend discovery endpoint after Home Assistant is configured:
 
 ```bash
-curl http://quantum-home.local:8080/api/ha/entities
+curl http://vokrr.local:8080/api/ha/entities
 ```
 
 Then replace the example entity IDs in `home-assistant/config/devices.yaml`.
@@ -156,4 +156,4 @@ All endpoints sit under `/api/` on port 8080. Authenticated ones require a Beare
 
 See `implementation_plan.md` §9 for the full plan. At a high level, the iOS app talks to the same backend as the touchscreen UI — never to Home Assistant directly — and mirrors the touchscreen's visual language (glass surfaces, audio-reactive aurora background, Jarvis status bar, notifications, rooms/devices, routines, activity, news).
 
-The current native app implementation lives in [ios/QuantumHome](./ios/QuantumHome) and its setup/testing notes live in [docs/setup/ios-app.md](./docs/setup/ios-app.md).
+The current native app implementation lives in [ios/Vokrr](./ios/Vokrr) and its setup/testing notes live in [docs/setup/ios-app.md](./docs/setup/ios-app.md).

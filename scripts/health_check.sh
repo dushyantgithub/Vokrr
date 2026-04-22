@@ -27,16 +27,16 @@ check_http() {
   local url="$2"
   local expected="${3:-200}"
   local code
-  code="$(curl -sS -o /tmp/quantum-home-health.out -w '%{http_code}' --max-time 10 "${url}" || true)"
+  code="$(curl -sS -o /tmp/vokrr-health.out -w '%{http_code}' --max-time 10 "${url}" || true)"
   if [[ "${code}" != "${expected}" ]]; then
     echo "[FAIL] ${name}: expected HTTP ${expected}, got ${code}"
-    cat /tmp/quantum-home-health.out 2>/dev/null || true
+    cat /tmp/vokrr-health.out 2>/dev/null || true
     exit 1
   fi
   echo "[ OK ] ${name}: HTTP ${code}"
 }
 
-echo "== Quantum Home health check =="
+echo "== Vokrr health check =="
 
 docker compose ps
 

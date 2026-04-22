@@ -1,6 +1,6 @@
 # Raspberry Pi Deployment
 
-This deployment removes the need for Tailscale by exposing only the Quantum Home backend to the internet over HTTPS. Home Assistant remains private on the Raspberry Pi and is reached locally by the backend.
+This deployment removes the need for Tailscale by exposing only the Vokrr backend to the internet over HTTPS. Home Assistant remains private on the Raspberry Pi and is reached locally by the backend.
 
 ## 1. Configure Environment
 
@@ -37,9 +37,9 @@ The backend auth database is persisted in `backend/data/auth.db`.
 
 Local endpoints remain:
 
-- `http://quantum-home.local:3000` for the touchscreen/web UI.
+- `http://vokrr.local:3000` for the touchscreen/web UI.
 - `http://127.0.0.1:8080` for the local backend.
-- `http://quantum-home.local:8123` for Home Assistant admin/setup on the LAN only.
+- `http://vokrr.local:8123` for Home Assistant admin/setup on the LAN only.
 
 ## 3. Publish The Backend Securely
 
@@ -92,8 +92,8 @@ curl -X POST https://api.vokrr.com/api/admin/users \
 Install the systemd unit after Chromium and X are installed:
 
 ```bash
-sudo cp infra/systemd/quantum-home-kiosk.service /etc/systemd/system/
+sudo cp infra/systemd/vokrr-kiosk.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable quantum-home-kiosk.service
-sudo systemctl start quantum-home-kiosk.service
+sudo systemctl enable vokrr-kiosk.service
+sudo systemctl start vokrr-kiosk.service
 ```

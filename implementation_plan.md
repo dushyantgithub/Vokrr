@@ -1,4 +1,4 @@
-# Quantum Home – Foundation Plan
+# Vokrr – Foundation Plan
 
 ## 1. Home Assistant Installation Method
 - **Recommendation:** Home Assistant Container managed through Docker Compose on Raspberry Pi OS Lite (64-bit).
@@ -13,12 +13,12 @@
 - **Flashing on workstation:**
   1. Install Raspberry Pi Imager.
   2. Select Raspberry Pi OS Lite (64-bit) → pick SD card → click the gear icon.
-  3. Enable SSH, set username/password (e.g., `homeops`), configure Wi-Fi SSID/passphrase and locale, optionally pre-set hostname (`quantum-home`).
+  3. Enable SSH, set username/password (e.g., `homeops`), configure Wi-Fi SSID/passphrase and locale, optionally pre-set hostname (`vokrr`).
   4. Write the image and safely eject the card.
 - **First boot checklist:**
   - Insert the card, connect Ethernet (preferred) or ensure Wi-Fi credentials were baked in, power on.
-  - Discover IP via router UI or `ping quantum-home.local`.
-  - SSH: `ssh homeops@quantum-home.local`.
+  - Discover IP via router UI or `ping vokrr.local`.
+  - SSH: `ssh homeops@vokrr.local`.
   - Run `sudo raspi-config` if further locale/keyboard adjustments are needed; set GPU memory to 256 MB for kiosk graphics.
 - **Wi-Fi & Static IP:**
   - To edit Wi-Fi manually, modify `/etc/wpa_supplicant/wpa_supplicant.conf`.
@@ -93,7 +93,7 @@ Log out/in so the `homeops` user can run Docker without sudo.
 
 ## 5. Repository / Folder Structure
 ```
-quantum-home/
+vokrr/
 ├── backend/                  # FastAPI service
 │   ├── app/
 │   ├── tests/
@@ -122,20 +122,20 @@ quantum-home/
 ```
 
 ## 6. Service Architecture Overview
-- **Home Assistant (Docker container):** runs integrations, exposes REST/WebSocket APIs. Mount `/homeops/quantum-home/home-assistant/config` for persistence. Home Assistant remains the device/integration engine and is not the primary UI.
+- **Home Assistant (Docker container):** runs integrations, exposes REST/WebSocket APIs. Mount `/homeops/vokrr/home-assistant/config` for persistence. Home Assistant remains the device/integration engine and is not the primary UI.
 - **Backend (FastAPI + async workers):** modules for local app authentication, device abstraction, HA client, intent handler, WebSocket broadcaster. Uses YAML/JSON metadata for rooms/devices and may add SQLite later for user/session metadata if needed.
 - **Frontend (React/Vite):** kiosk web app talking to the backend via authenticated REST + WebSocket for realtime state.
-- **iOS App (Swift/SwiftUI, planned):** native local-network client that discovers or accepts the Quantum Home server address, requires username/password login on first launch, stores the issued app token in Keychain, then displays the same rooms/devices/actions exposed by the backend.
+- **iOS App (Swift/SwiftUI, planned):** native local-network client that discovers or accepts the Vokrr server address, requires username/password login on first launch, stores the issued app token in Keychain, then displays the same rooms/devices/actions exposed by the backend.
 - **Voice Pipeline:** wake-word engine (Porcupine/openWakeWord), recorder, STT (Vosk/Coqui), intent parser, TTS (Piper) as separate Python services communicating over gRPC/HTTP.
 - **Shared infrastructure:** Compose-defined network, `.env` files for secrets, Docker logging routed to journald, optional systemd units for kiosk and Compose stack autostart.
 
 ### 6.1 Local Network Exposure & App Login
-- Quantum Home is exposed on the local network through the Raspberry Pi hostname/IP:
-  - Touchscreen/web UI: `http://quantum-home.local:3000`
-  - Backend API: `http://quantum-home.local:8080`
-  - Home Assistant admin/setup UI: `http://quantum-home.local:8123`
-- Normal users should use the Quantum Home app login, not the Home Assistant UI. Home Assistant credentials remain for administrator setup/integrations only.
-- The backend owns the Quantum Home username/password credentials via environment variables:
+- Vokrr is exposed on the local network through the Raspberry Pi hostname/IP:
+  - Touchscreen/web UI: `http://vokrr.local:3000`
+  - Backend API: `http://vokrr.local:8080`
+  - Home Assistant admin/setup UI: `http://vokrr.local:8123`
+- Normal users should use the Vokrr app login, not the Home Assistant UI. Home Assistant credentials remain for administrator setup/integrations only.
+- The backend owns the Vokrr username/password credentials via environment variables:
   - `APP_USERNAME`
   - `APP_PASSWORD`
   - `APP_AUTH_SECRET`
@@ -148,7 +148,7 @@ Follow these steps now that the touchscreen is connected:
 
 1. **Prep Workstation & Downloads**
    - Install Raspberry Pi Imager, gather Wi-Fi credentials, plan secure passwords.
-2. **Wipe & Flash microSD** (per Section 2) ensuring hostname `quantum-home` and SSH enabled.
+2. **Wipe & Flash microSD** (per Section 2) ensuring hostname `vokrr` and SSH enabled.
 3. **Boot & Network**
    - Attach Waveshare HDMI + USB before powering on so the Pi negotiates the custom resolution.
    - SSH into the Pi, change default password, optionally create secondary admin user.
@@ -158,8 +158,8 @@ Follow these steps now that the touchscreen is connected:
 7. **Project Checkout**
    ```bash
    mkdir -p ~/Projects && cd ~/Projects
-   git clone <repo-url> quantum-home
-   cd quantum-home
+   git clone <repo-url> vokrr
+   cd vokrr
    ```
 8. **Hardware Verification**
    - Display/touch: `xinput list`, run Chromium fullscreen test.
@@ -174,7 +174,7 @@ A helper script now lives at `scripts/phase0_setup.sh`. Run it locally on the Pi
 
 ### Usage
 ```bash
-cd ~/Projects/quantum-home
+cd ~/Projects/vokrr
 sudo PI_USER=$USER ./scripts/phase0_setup.sh
 ```
 - `PI_USER` defaults to `homeops`; override if your login differs so the script can add you to the `docker` group.
@@ -195,8 +195,8 @@ The iOS app is a native companion for the same local-first backend. It never tal
 
 ### 9.1 Requirements
 
-1. First launch asks for (or discovers) the Quantum Home server address, defaulting to `http://quantum-home.local:8080`.
-2. User signs in with the Quantum Home app username/password (not Home Assistant credentials).
+1. First launch asks for (or discovers) the Vokrr server address, defaulting to `http://vokrr.local:8080`.
+2. User signs in with the Vokrr app username/password (not Home Assistant credentials).
 3. The returned token is stored in Keychain; subsequent launches attempt it against `/api/system/health` before showing login.
 4. The app loads rooms, devices, scenes/routines, and system health from the backend, and controls devices through the same action APIs used by the touchscreen UI.
 5. The app subscribes to the backend WebSocket for live state, voice, and scene events.
@@ -232,15 +232,15 @@ The iOS app should render each of the touchscreen's primary views. The navigatio
 - `MetalKit` (`MTKView`) for the `SoftAurora` shader, or fall back to SwiftUI `Canvas` + `TimelineView` if Metal is unavailable.
 - `WebKit` (`WKWebView`) for the News tab.
 - `Keychain Services` (wrapped in a small `KeychainClient`) for the auth token and server address.
-- `Network.framework` + `NWPathMonitor` for offline detection; `Bonjour`/`NWBrowser` for mDNS discovery of `_quantum-home._tcp.local.` once the backend advertises it.
+- `Network.framework` + `NWPathMonitor` for offline detection; `Bonjour`/`NWBrowser` for mDNS discovery of `_vokrr._tcp.local.` once the backend advertises it.
 - `os.Logger` + `OSLogStore` for diagnostics.
 
 ### 9.4 App Module Layout
 
 ```
-QuantumHomeiOS/
+VokrriOS/
 ├── App/
-│   ├── QuantumHomeApp.swift            # @main, scene setup, environment injection
+│   ├── VokrrApp.swift            # @main, scene setup, environment injection
 │   └── AppState.swift                  # @Observable root store (rooms, devices, scenes, voice, notifications, health)
 ├── Networking/
 │   ├── APIClient.swift                 # async REST calls, token header injection
@@ -286,7 +286,7 @@ QuantumHomeiOS/
 1. On launch, read `serverBaseURL` + `authToken` from Keychain.
 2. If both exist, call `GET /api/system/health` with the token; on 200 proceed to app shell.
 3. If 401, fall back to `LoginView` which posts to `POST /api/auth/login` with `{username, password}` and stores `{token}` in Keychain.
-4. If the server address is missing or unreachable, show `ServerSetupView` with manual entry (`http://quantum-home.local:8080`) and Bonjour results.
+4. If the server address is missing or unreachable, show `ServerSetupView` with manual entry (`http://vokrr.local:8080`) and Bonjour results.
 5. All subsequent REST calls attach `Authorization: Bearer <token>`; WebSocket connects to `ws(s)://<host>/ws?token=<token>`.
 6. On any 401, purge Keychain and route back to login.
 7. "Sign out" purges Keychain, closes the WebSocket, and clears in-memory state.
@@ -335,7 +335,7 @@ Match the touchscreen visual language:
 ### 9.10 Offline & Error Handling
 
 - `NWPathMonitor` drives a `ReachabilityBanner` at the top of the app when the server is unreachable.
-- All REST calls go through `APIClient.request(_:)` which centralises: timeouts (5s connect, 15s read), retries for transient errors (2×), 401 handling, and mapping to a `QuantumHomeError` enum (`unauthorized`, `unreachable`, `serverError(String)`).
+- All REST calls go through `APIClient.request(_:)` which centralises: timeouts (5s connect, 15s read), retries for transient errors (2×), 401 handling, and mapping to a `VokrrError` enum (`unauthorized`, `unreachable`, `serverError(String)`).
 - The WebSocket client uses exponential backoff reconnect with jitter, capped at 30 s.
 - When offline, device toggles fail fast with a toast — no optimistic mutation is committed until the server confirms via `device.updated`.
 
@@ -349,7 +349,7 @@ Match the touchscreen visual language:
 
 ### 9.12 Backend Touch-Ups Needed For The iOS App
 
-- Add a Bonjour/mDNS advertisement on the Pi (`avahi-publish-service "Quantum Home" _quantum-home._tcp 8080`, or an `avahi-aliases`-style systemd unit) so `NWBrowser` can auto-discover the server.
+- Add a Bonjour/mDNS advertisement on the Pi (`avahi-publish-service "Vokrr" _vokrr._tcp 8080`, or an `avahi-aliases`-style systemd unit) so `NWBrowser` can auto-discover the server.
 - Expose a capability manifest endpoint (e.g. `GET /api/system/manifest`) returning app version, min client version, and feature flags so iOS can refuse to start against an incompatible backend.
 - Consider device-scoped push credentials (per-device tokens) instead of the single shared `APP_PASSWORD` once the iOS app ships.
 - When the backend starts serving HTTPS (planned post‑LAN phase), add a self-signed certificate trust flow in iOS (pinning or a user-approved certificate).
