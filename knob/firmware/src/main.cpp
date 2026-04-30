@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <esp_display_panel.hpp>
+#include <esp_log.h>
 #include <lvgl.h>
 
 #include "config_private.h"
@@ -19,6 +20,8 @@ using namespace esp_panel::board;
 using namespace esp_panel::drivers;
 
 namespace {
+
+static const char *TAG = "VokrrKnob";
 
 constexpr size_t MAX_ROOMS = 12;
 constexpr size_t MAX_DEVICES_PER_ROOM = 16;
@@ -169,9 +172,14 @@ bool getJson(const String &path, DynamicJsonDocument &out) {
 
 bool login() {
   DynamicJsonDocument doc(4096);
+  ESP_LOGI(TAG, "Logging into Vokrr");
   String body = String("{\"username\":\"") + VOKRR_USERNAME + "\",\"password\":\"" + VOKRR_PASSWORD + "\"}";
-  if (!postJson("/api/auth/login", body, &doc)) return false;
+  if (!postJson("/api/auth/login", body, &doc)) {
+    ESP_LOGE(TAG, "Vokrr login request failed");
+    return false;
+  }
   accessToken = doc["access_token"].as<String>();
+  ESP_LOGI(TAG, "Vokrr login %s", accessToken.length() > 0 ? "succeeded" : "returned no token");
   return accessToken.length() > 0;
 }
 
@@ -210,8 +218,13 @@ void parseRooms(JsonArray root) {
 
 bool fetchRooms() {
   DynamicJsonDocument doc(32768);
-  if (!getJson("/api/rooms", doc)) return false;
+  ESP_LOGI(TAG, "Fetching Vokrr rooms");
+  if (!getJson("/api/rooms", doc)) {
+    ESP_LOGE(TAG, "Vokrr room sync failed");
+    return false;
+  }
   parseRooms(doc.as<JsonArray>());
+  ESP_LOGI(TAG, "Vokrr room sync succeeded: %u rooms", static_cast<unsigned>(roomCount));
   lastRefresh = millis();
   return true;
 }
@@ -456,14 +469,17 @@ void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(VOKRR_WIFI_SSID, VOKRR_WIFI_PASSWORD);
   setStatus("Connecting WiFi");
+  ESP_LOGI(TAG, "Connecting to WiFi");
   Serial.printf("Connecting to WiFi SSID %s\n", VOKRR_WIFI_SSID);
   for (int i = 0; i < 60 && WiFi.status() != WL_CONNECTED; i++) {
     delay(250);
   }
   if (WiFi.status() == WL_CONNECTED) {
+    ESP_LOGI(TAG, "WiFi connected: %s", WiFi.localIP().toString().c_str());
     Serial.printf("WiFi connected: %s\n", WiFi.localIP().toString().c_str());
     setStatus("WiFi connected");
   } else {
+    ESP_LOGE(TAG, "WiFi connection failed");
     Serial.println("WiFi connection failed");
     setStatus("WiFi failed");
   }
@@ -505,6 +521,7 @@ void longPressCallback(void *button_handle, void *usr_data) {
 
 void setup() {
   Serial.begin(115200);
+  ESP_LOGI(TAG, "Starting Vokrr Smart Knob");
   Serial.println("Starting Vokrr Smart Knob");
 
   Board *board = new Board();
@@ -538,10 +555,12 @@ void setup() {
 
   connectWifi();
   if (WiFi.status() == WL_CONNECTED && login() && fetchRooms()) {
+    ESP_LOGI(TAG, "Vokrr Smart Knob is online");
     lvgl_port_lock(-1);
     drawUi();
     lvgl_port_unlock();
   } else {
+    ESP_LOGE(TAG, "Vokrr Smart Knob backend startup failed");
     lvgl_port_lock(-1);
     setStatus("Backend offline");
     drawUi();
@@ -559,6 +578,7 @@ void loop() {
   bool actionRefreshDue = lastActionRefresh && now - lastActionRefresh > ACTION_REFRESH_MS;
   if (WiFi.status() == WL_CONNECTED && (refreshDue || actionRefreshDue)) {
     if (!accessToken.length() && !login()) {
+      ESP_LOGE(TAG, "Login failed during refresh");
       lvgl_port_lock(-1);
       setStatus("Login failed");
       lvgl_port_unlock();
@@ -572,6 +592,7 @@ void loop() {
       lvgl_port_unlock();
     } else {
       accessToken = "";
+      ESP_LOGE(TAG, "Sync failed during refresh; token cleared");
       lvgl_port_lock(-1);
       setStatus("Sync failed");
       lvgl_port_unlock();
