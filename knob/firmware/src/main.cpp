@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <WebSocketsClient.h>
 #include <WiFi.h>
 #include <esp_display_panel.hpp>
 #include <esp_log.h>
@@ -25,8 +26,10 @@ static const char *TAG = "VokrrKnob";
 
 constexpr size_t MAX_ROOMS = 12;
 constexpr size_t MAX_DEVICES_PER_ROOM = 16;
-constexpr uint32_t REFRESH_MS = 15000;
-constexpr uint32_t ACTION_REFRESH_MS = 600;
+constexpr uint32_t REFRESH_MS_POLLING = 15000;
+constexpr uint32_t REFRESH_MS_REALTIME_FALLBACK = 120000;
+constexpr uint32_t ACTION_REFRESH_MS = 200;
+constexpr uint16_t HTTP_TIMEOUT_MS = 8000;
 
 struct DeviceState {
   String id;
@@ -54,6 +57,9 @@ String accessToken;
 uint32_t lastRefresh = 0;
 uint32_t lastActionRefresh = 0;
 
+WebSocketsClient realtimeWs;
+volatile bool realtimeWsConnected = false;
+
 lv_obj_t *screen = nullptr;
 lv_obj_t *statusLabel = nullptr;
 lv_obj_t *titleLabel = nullptr;
@@ -62,15 +68,12 @@ lv_obj_t *centerButton = nullptr;
 lv_obj_t *iconLabel = nullptr;
 lv_obj_t *nameLabel = nullptr;
 lv_obj_t *stateLabel = nullptr;
-lv_obj_t *leftLabel = nullptr;
-lv_obj_t *rightLabel = nullptr;
 lv_obj_t *hintLabel = nullptr;
 lv_obj_t *backButton = nullptr;
 
 lv_style_t styleScreen;
 lv_style_t styleCenter;
 lv_style_t styleCenterOn;
-lv_style_t styleSide;
 lv_style_t styleTiny;
 
 ESP_Knob *knob = nullptr;
@@ -78,6 +81,158 @@ Button *button = nullptr;
 
 String httpUrl(const String &path) {
   return String(VOKRR_API_BASE) + path;
+}
+
+struct ApiWsEndpoint {
+  bool tls = false;
+  String host;
+  uint16_t port = 80;
+};
+
+ApiWsEndpoint parseApiWsEndpoint() {
+  ApiWsEndpoint ep;
+  String base = String(VOKRR_API_BASE);
+  base.trim();
+  if (base.startsWith("https://")) {
+    ep.tls = true;
+    ep.port = 443;
+    base = base.substring(8);
+  } else if (base.startsWith("http://")) {
+    base = base.substring(7);
+  }
+  int pathSlash = base.indexOf('/');
+  if (pathSlash >= 0) {
+    base = base.substring(0, pathSlash);
+  }
+  int colon = base.indexOf(':');
+  if (colon >= 0) {
+    ep.host = base.substring(0, colon);
+    ep.port = static_cast<uint16_t>(base.substring(colon + 1).toInt());
+    if (ep.port == 0) ep.port = ep.tls ? 443 : 80;
+  } else {
+    ep.host = base;
+  }
+  return ep;
+}
+
+void applyDeviceFromJson(DeviceState &device, JsonObject deviceJson) {
+  device.id = deviceJson["id"] | "";
+  device.name = deviceJson["name"] | "Device";
+  device.type = deviceJson["type"] | "";
+  JsonObject state = deviceJson["state"];
+  const char *rawState = state["state"] | "";
+  device.isOn = state["is_on"] | false;
+  device.unavailable = strcmp(rawState, "unavailable") == 0 || strcmp(rawState, "unknown") == 0;
+  if (!state["brightness"].isNull()) {
+    device.level = state["brightness"].as<int>();
+  } else if (!state["percentage"].isNull()) {
+    device.level = state["percentage"].as<int>();
+  } else {
+    device.level = -1;
+  }
+}
+
+bool mergeDevicePayload(JsonObject payload) {
+  String id = payload["id"] | "";
+  if (!id.length()) return false;
+  for (size_t r = 0; r < roomCount; r++) {
+    RoomState &room = rooms[r];
+    for (size_t d = 0; d < room.deviceCount; d++) {
+      if (room.devices[d].id == id) {
+        applyDeviceFromJson(room.devices[d], payload);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void parseRooms(JsonArray root);
+void drawUi();
+
+void realtimeWsDisconnect();
+void realtimeWsConnect();
+void realtimeWsEvent(WStype_t type, uint8_t *payload, size_t length);
+
+void realtimeWsEvent(WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      realtimeWsConnected = false;
+      ESP_LOGW(TAG, "Realtime WS disconnected");
+      break;
+    case WStype_CONNECTED:
+      realtimeWsConnected = true;
+      ESP_LOGI(TAG, "Realtime WS connected");
+      break;
+    case WStype_TEXT:
+      if (payload == nullptr || length == 0) break;
+      {
+        const size_t docCapacity =
+            length > 12000 ? static_cast<size_t>(57344) : static_cast<size_t>(6144);
+        DynamicJsonDocument doc(docCapacity);
+        DeserializationError err = deserializeJson(doc, payload, length);
+        if (err) {
+          ESP_LOGW(TAG, "WS JSON parse failed: %s", err.c_str());
+          break;
+        }
+        const char *ev = doc["event"] | "";
+        bool redraw = false;
+        if (strcmp(ev, "snapshot") == 0) {
+          JsonArray roomsArr = doc["payload"]["rooms"].as<JsonArray>();
+          if (!roomsArr.isNull()) {
+            parseRooms(roomsArr);
+            lastRefresh = millis();
+            redraw = true;
+          }
+        } else if (strcmp(ev, "device.updated") == 0) {
+          JsonObject p = doc["payload"].as<JsonObject>();
+          if (!p.isNull()) {
+            mergeDevicePayload(p);
+            lastRefresh = millis();
+            redraw = true;
+          }
+        }
+        if (redraw) {
+          lvgl_port_lock(-1);
+          drawUi();
+          lvgl_port_unlock();
+        }
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+void realtimeWsDisconnect() {
+  realtimeWs.disconnect();
+  realtimeWsConnected = false;
+}
+
+void realtimeWsConnect() {
+  if (!accessToken.length() || WiFi.status() != WL_CONNECTED) return;
+
+  realtimeWsDisconnect();
+
+  realtimeWs.onEvent(realtimeWsEvent);
+  realtimeWs.setReconnectInterval(4000);
+
+  ApiWsEndpoint ep = parseApiWsEndpoint();
+  String path = String("/ws?token=") + accessToken;
+
+  if (ep.tls) {
+#if defined(HAS_SSL) && defined(ESP32)
+    realtimeWs.beginSSL(ep.host.c_str(), ep.port, path.c_str(), nullptr, "arduino");
+#else
+    ESP_LOGE(TAG, "SSL requested but HAS_SSL not available for WebSockets");
+#endif
+  } else {
+    realtimeWs.begin(ep.host.c_str(), ep.port, path.c_str(), "arduino");
+  }
+}
+
+uint32_t refreshIntervalMs() {
+  return realtimeWsConnected ? REFRESH_MS_REALTIME_FALLBACK : REFRESH_MS_POLLING;
 }
 
 void setStatus(const char *text) {
@@ -120,8 +275,11 @@ String deviceStatus(const DeviceState &device) {
   return status;
 }
 
+void drawUi();
+
 bool postJson(const String &path, const String &body, DynamicJsonDocument *out = nullptr) {
   HTTPClient http;
+  http.setTimeout(HTTP_TIMEOUT_MS);
   http.begin(httpUrl(path));
   http.addHeader("Content-Type", "application/json");
   if (accessToken.length()) {
@@ -149,6 +307,7 @@ bool postJson(const String &path, const String &body, DynamicJsonDocument *out =
 
 bool getJson(const String &path, DynamicJsonDocument &out) {
   HTTPClient http;
+  http.setTimeout(HTTP_TIMEOUT_MS);
   http.begin(httpUrl(path));
   if (accessToken.length()) {
     http.addHeader("Authorization", "Bearer " + accessToken);
@@ -195,20 +354,7 @@ void parseRooms(JsonArray root) {
     for (JsonObject deviceJson : roomJson["devices"].as<JsonArray>()) {
       if (room.deviceCount >= MAX_DEVICES_PER_ROOM) break;
       DeviceState &device = room.devices[room.deviceCount++];
-      device.id = deviceJson["id"] | "";
-      device.name = deviceJson["name"] | "Device";
-      device.type = deviceJson["type"] | "";
-      JsonObject state = deviceJson["state"];
-      const char *rawState = state["state"] | "";
-      device.isOn = state["is_on"] | false;
-      device.unavailable = strcmp(rawState, "unavailable") == 0 || strcmp(rawState, "unknown") == 0;
-      if (!state["brightness"].isNull()) {
-        device.level = state["brightness"].as<int>();
-      } else if (!state["percentage"].isNull()) {
-        device.level = state["percentage"].as<int>();
-      } else {
-        device.level = -1;
-      }
+      applyDeviceFromJson(device, deviceJson);
     }
   }
   if (activeRoom >= roomCount) activeRoom = roomCount ? roomCount - 1 : 0;
@@ -230,17 +376,42 @@ bool fetchRooms() {
 }
 
 bool toggleCurrentDevice() {
+  String deviceId;
+  bool prevOn = false;
+
+  lvgl_port_lock(-1);
   DeviceState *device = currentDevice();
-  if (!device || busy) return false;
+  if (!device || busy) {
+    lvgl_port_unlock();
+    return false;
+  }
   busy = true;
+  prevOn = device->isOn;
+  deviceId = device->id;
+  device->isOn = !device->isOn;
   setStatus("Updating");
-  bool ok = postJson("/api/devices/" + device->id + "/toggle", "");
+  drawUi();
+  lvgl_port_unlock();
+
+  bool ok = postJson("/api/devices/" + deviceId + "/toggle", "");
+
+  lvgl_port_lock(-1);
   busy = false;
+  device = currentDevice();
+  if (!ok) {
+    if (device && device->id == deviceId) {
+      device->isOn = prevOn;
+    }
+    setStatus("Action failed");
+  } else if (WiFi.status() == WL_CONNECTED) {
+    setStatus(realtimeWsConnected ? "Vokrr live" : "Vokrr online");
+  }
   lastActionRefresh = millis();
+  drawUi();
+  lvgl_port_unlock();
+
   return ok;
 }
-
-void drawUi();
 
 void moveSelection(int direction) {
   if (busy) return;
@@ -264,11 +435,7 @@ void activateSelection() {
     drawUi();
     return;
   }
-  if (toggleCurrentDevice()) {
-    drawUi();
-  } else {
-    setStatus("Action failed");
-  }
+  toggleCurrentDevice();
 }
 
 void goBack() {
@@ -295,6 +462,8 @@ void drawUi() {
 
   if (WiFi.status() != WL_CONNECTED) {
     setStatus("WiFi offline");
+  } else if (realtimeWsConnected) {
+    setStatus("Vokrr live");
   } else {
     setStatus("Vokrr online");
   }
@@ -305,8 +474,6 @@ void drawUi() {
     lv_label_set_text(iconLabel, LV_SYMBOL_WARNING);
     lv_label_set_text(nameLabel, "No rooms found");
     lv_label_set_text(stateLabel, "Check backend");
-    lv_label_set_text(leftLabel, "");
-    lv_label_set_text(rightLabel, "");
     lv_label_set_text(hintLabel, "Press to retry");
     return;
   }
@@ -319,10 +486,6 @@ void drawUi() {
     lv_label_set_text(nameLabel, trimmedText(room->name, 20).c_str());
     lv_label_set_text(stateLabel, String(String(room->deviceCount) + " devices").c_str());
 
-    const RoomState &leftRoom = rooms[(activeRoom + roomCount - 1) % roomCount];
-    const RoomState &rightRoom = rooms[(activeRoom + 1) % roomCount];
-    lv_label_set_text(leftLabel, trimmedText(leftRoom.name, 11).c_str());
-    lv_label_set_text(rightLabel, trimmedText(rightRoom.name, 11).c_str());
     lv_label_set_text(hintLabel, "Rotate rooms  |  Press select");
     return;
   }
@@ -336,8 +499,6 @@ void drawUi() {
     lv_label_set_text(iconLabel, LV_SYMBOL_WARNING);
     lv_label_set_text(nameLabel, "No devices");
     lv_label_set_text(stateLabel, "Rotate back");
-    lv_label_set_text(leftLabel, "");
-    lv_label_set_text(rightLabel, "");
     lv_label_set_text(hintLabel, "Long press for rooms");
     return;
   }
@@ -350,10 +511,6 @@ void drawUi() {
   lv_label_set_text(nameLabel, trimmedText(device->name, 18).c_str());
   lv_label_set_text(stateLabel, deviceStatus(*device).c_str());
 
-  const DeviceState &leftDevice = room->devices[(activeDevice + room->deviceCount - 1) % room->deviceCount];
-  const DeviceState &rightDevice = room->devices[(activeDevice + 1) % room->deviceCount];
-  lv_label_set_text(leftLabel, trimmedText(leftDevice.name, 11).c_str());
-  lv_label_set_text(rightLabel, trimmedText(rightDevice.name, 11).c_str());
   lv_label_set_text(hintLabel, "Rotate device  |  Press toggle");
 }
 
@@ -384,10 +541,6 @@ void createUi() {
   lv_style_set_shadow_opa(&styleCenterOn, LV_OPA_30);
   lv_style_set_pad_all(&styleCenterOn, 12);
 
-  lv_style_init(&styleSide);
-  lv_style_set_text_color(&styleSide, lv_color_hex(0x777C86));
-  lv_style_set_text_font(&styleSide, &lv_font_montserrat_16);
-
   lv_style_init(&styleTiny);
   lv_style_set_text_color(&styleTiny, lv_color_hex(0x9CA3AF));
   lv_style_set_text_font(&styleTiny, &lv_font_montserrat_12);
@@ -409,36 +562,24 @@ void createUi() {
   lv_obj_add_style(subtitleLabel, &styleTiny, 0);
   lv_obj_align(subtitleLabel, LV_ALIGN_TOP_MID, 0, 82);
 
+  centerButton = lv_btn_create(screen);
+  lv_obj_set_size(centerButton, 250, 250);
+  lv_obj_add_style(centerButton, &styleCenter, 0);
+  lv_obj_align(centerButton, LV_ALIGN_CENTER, 0, 10);
+  lv_obj_add_event_cb(centerButton, screenClickEvent, LV_EVENT_CLICKED, nullptr);
+
   backButton = lv_btn_create(screen);
   lv_obj_set_size(backButton, 46, 46);
   lv_obj_set_style_radius(backButton, 23, 0);
   lv_obj_set_style_bg_color(backButton, lv_color_hex(0x20242C), 0);
   lv_obj_set_style_border_width(backButton, 1, 0);
   lv_obj_set_style_border_color(backButton, lv_color_hex(0x353B47), 0);
-  lv_obj_align(backButton, LV_ALIGN_TOP_LEFT, 42, 45);
+  lv_obj_align_to(backButton, centerButton, LV_ALIGN_OUT_LEFT_MID, -14, 0);
   lv_obj_add_event_cb(backButton, backClickEvent, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *backIcon = lv_label_create(backButton);
   lv_label_set_text(backIcon, LV_SYMBOL_LEFT);
   lv_obj_center(backIcon);
   lv_obj_add_flag(backButton, LV_OBJ_FLAG_HIDDEN);
-
-  leftLabel = lv_label_create(screen);
-  lv_obj_add_style(leftLabel, &styleSide, 0);
-  lv_obj_set_width(leftLabel, 92);
-  lv_obj_set_style_text_align(leftLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(leftLabel, LV_ALIGN_LEFT_MID, 6, 8);
-
-  rightLabel = lv_label_create(screen);
-  lv_obj_add_style(rightLabel, &styleSide, 0);
-  lv_obj_set_width(rightLabel, 92);
-  lv_obj_set_style_text_align(rightLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(rightLabel, LV_ALIGN_RIGHT_MID, -6, 8);
-
-  centerButton = lv_btn_create(screen);
-  lv_obj_set_size(centerButton, 250, 250);
-  lv_obj_add_style(centerButton, &styleCenter, 0);
-  lv_obj_align(centerButton, LV_ALIGN_CENTER, 0, 10);
-  lv_obj_add_event_cb(centerButton, screenClickEvent, LV_EVENT_CLICKED, nullptr);
 
   iconLabel = lv_label_create(centerButton);
   lv_obj_set_style_text_font(iconLabel, &lv_font_montserrat_48, 0);
@@ -478,6 +619,7 @@ void connectWifi() {
     ESP_LOGI(TAG, "WiFi connected: %s", WiFi.localIP().toString().c_str());
     Serial.printf("WiFi connected: %s\n", WiFi.localIP().toString().c_str());
     setStatus("WiFi connected");
+    realtimeWsConnect();
   } else {
     ESP_LOGE(TAG, "WiFi connection failed");
     Serial.println("WiFi connection failed");
@@ -505,8 +647,13 @@ void singleClickCallback(void *button_handle, void *usr_data) {
   (void)button_handle;
   (void)usr_data;
   lvgl_port_lock(-1);
-  activateSelection();
+  if (!inDeviceMode) {
+    activateSelection();
+    lvgl_port_unlock();
+    return;
+  }
   lvgl_port_unlock();
+  toggleCurrentDevice();
 }
 
 void longPressCallback(void *button_handle, void *usr_data) {
@@ -556,6 +703,7 @@ void setup() {
   connectWifi();
   if (WiFi.status() == WL_CONNECTED && login() && fetchRooms()) {
     ESP_LOGI(TAG, "Vokrr Smart Knob is online");
+    realtimeWsConnect();
     lvgl_port_lock(-1);
     drawUi();
     lvgl_port_unlock();
@@ -569,12 +717,25 @@ void setup() {
 }
 
 void loop() {
+  const uint32_t now = millis();
+
   if (WiFi.status() != WL_CONNECTED) {
+    realtimeWsDisconnect();
     connectWifi();
+  } else {
+    realtimeWs.loop();
+    if (accessToken.length() && !realtimeWs.isConnected()) {
+      static uint32_t lastWsRetry = 0;
+      if (now - lastWsRetry > 4000) {
+        lastWsRetry = now;
+        realtimeWsConnect();
+      }
+    }
   }
 
-  uint32_t now = millis();
-  bool refreshDue = now - lastRefresh > REFRESH_MS;
+  bool refreshDue =
+      static_cast<int32_t>(now - lastRefresh) > static_cast<int32_t>(refreshIntervalMs());
+      static_cast<int32_t>(now - lastRefresh) > static_cast<int32_t>(refreshIntervalMs());
   bool actionRefreshDue = lastActionRefresh && now - lastActionRefresh > ACTION_REFRESH_MS;
   if (WiFi.status() == WL_CONNECTED && (refreshDue || actionRefreshDue)) {
     if (!accessToken.length() && !login()) {
@@ -592,6 +753,7 @@ void loop() {
       lvgl_port_unlock();
     } else {
       accessToken = "";
+      realtimeWsDisconnect();
       ESP_LOGE(TAG, "Sync failed during refresh; token cleared");
       lvgl_port_lock(-1);
       setStatus("Sync failed");
@@ -599,5 +761,5 @@ void loop() {
     }
   }
 
-  delay(50);
+  delay(10);
 }
