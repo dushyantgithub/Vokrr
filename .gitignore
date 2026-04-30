@@ -24,3 +24,5 @@ home-assistant/config/.ha_run.lock
 voice-pipeline/models/
 infra/env/*.env
 !infra/env/*.env.example
+knob/.secrets/
+knob/firmware/src/config_private.h
