@@ -30,39 +30,38 @@
         static domain_name_servers=192.168.1.1
     ```
 
-### 2.1 Waveshare 70H-1024600 Touchscreen Setup
-The display uses HDMI for video (1024×600 @ 60 Hz) and USB for touch. Configure it immediately after the first system upgrade so the UI stack can run native resolution and accurate touch mapping.
+### 2.1 Official Raspberry Pi 7-inch Touch Display Setup
+The display uses the Raspberry Pi DSI connector for video and capacitive touch. The original official 7-inch panel runs at 800×480 @ 60 Hz; configure it immediately after the first system upgrade so the UI stack uses the panel's native resolution.
 
-1. **Enable the correct resolution** (`sudo nano /boot/config.txt`):
+1. **Remove the old Waveshare HDMI override** if it exists in `/boot/firmware/config.txt` or `/boot/config.txt`:
    ```
-   hdmi_force_hotplug=1
-   hdmi_group=2
-   hdmi_mode=87
-   hdmi_cvt=1024 600 60 6 0 0 0
-   max_framebuffer_width=1024
-   max_framebuffer_height=600
-   framebuffer_width=1024
-   framebuffer_height=600
-   hdmi_drive=1
-   dtoverlay=vc4-kms-v3d
+   # Waveshare-70H-1024600
+   ...
+   # End Waveshare-70H-1024600
    ```
+2. **Enable KMS and native DSI mode**:
+   - Ensure `dtoverlay=vc4-kms-v3d` exists in `/boot/firmware/config.txt` or `/boot/config.txt`.
+   - Remove any `video=HDMI-A-*:1024x600M@60D` entry from `/boot/firmware/cmdline.txt` or `/boot/cmdline.txt`.
+   - Add `video=DSI-1:800x480@60` to the single-line cmdline file.
    - Save, exit, then reboot: `sudo reboot`.
-2. **Confirm display timing:** after reboot run `tvservice -s` (should show 1024×600). If blank, ensure HDMI cable is connected before boot.
-3. **Install touch/GUI dependencies:**
+   - The helper script in Section 8 performs this cleanup automatically.
+3. **Confirm display timing:** after reboot run `wlr-randr`, `xrandr`, or `kmsprint` depending on the desktop session. The active DSI output should report 800×480.
+4. **Install touch/GUI dependencies:**
    ```bash
    sudo apt install -y xserver-xorg x11-xserver-utils xinput xinput-calibrator \
        chromium-browser openbox lightdm xserver-xorg-input-libinput
    ```
-4. **Calibrate touch (only if touches do not line up):**
+5. **Calibrate touch only if touches do not line up:**
    ```bash
    export DISPLAY=:0
    sudo xinput_calibrator
    ```
-   - Copy the generated `Section "InputClass"` snippet into `/etc/X11/xorg.conf.d/99-waveshare-touch.conf` (create directory if missing) to persist calibration.
-5. **Ensure USB touch recognized:** `lsusb` should show a Waveshare/ILITEK device. Verify input: `xinput list` → note device name → `xinput test <id>`.
-6. **Rotate orientation if required:**
-   - For landscape kiosk, set `Option "TransformationMatrix" "1 0 0 0 1 0 0 0 1"` in the calibration file.
-7. **Test end-to-end:** start X temporarily and open Chromium to confirm multi-touch/mouse interactions: `startx /usr/bin/chromium-browser --start-fullscreen`.
+   - The official DSI display normally works without manual calibration on current Raspberry Pi OS.
+6. **Ensure touch is recognized:** verify input with `xinput list` under X11 or `libinput list-devices` under Wayland.
+7. **Rotate orientation if required:**
+   - Keep landscape as the default for the kiosk.
+   - For display rotation on KMS, adjust the DSI `video=` cmdline with a supported `rotate=` value.
+8. **Test end-to-end:** open Chromium fullscreen to confirm touch interactions: `DISPLAY=:0 chromium-browser --start-fullscreen http://localhost:3000`.
 
 ## 3. System Updates & Base Packages
 Run immediately after first login.
@@ -150,7 +149,7 @@ Follow these steps now that the touchscreen is connected:
    - Install Raspberry Pi Imager, gather Wi-Fi credentials, plan secure passwords.
 2. **Wipe & Flash microSD** (per Section 2) ensuring hostname `vokrr` and SSH enabled.
 3. **Boot & Network**
-   - Attach Waveshare HDMI + USB before powering on so the Pi negotiates the custom resolution.
+   - Attach the official Raspberry Pi DSI display ribbon and power before powering on.
    - SSH into the Pi, change default password, optionally create secondary admin user.
 4. **Apply System Updates & Firmware** using commands from Section 3.
 5. **Configure Touchscreen** using Section 2.1 steps immediately after the first reboot so calibration persists before kiosk setup.
@@ -167,10 +166,10 @@ Follow these steps now that the touchscreen is connected:
    - Speaker: `speaker-test -c2 -twav` to confirm output.
 9. **Security Baseline** already set with UFW; consider SSH key auth and disable password login once confident.
 
-With Phase 0 actively underway per the checklist above, the Raspberry Pi will exit this phase with a clean OS, Waveshare touchscreen calibrated at 1024×600, Docker/Compose installed, security hardened, and the repository ready for subsequent phases (Home Assistant containerization, backend/frontend scaffolding, voice pipeline, kiosk autostart, etc.).
+With Phase 0 actively underway per the checklist above, the Raspberry Pi will exit this phase with a clean OS, the official Raspberry Pi touchscreen running at 800×480, Docker/Compose installed, security hardened, and the repository ready for subsequent phases (Home Assistant containerization, backend/frontend scaffolding, voice pipeline, kiosk autostart, etc.).
 
 ## 8. Phase 0 Automation Script
-A helper script now lives at `scripts/phase0_setup.sh`. Run it locally on the Pi to execute the repeatable parts of Phase 0 (system upgrades, package install, HDMI block, Docker setup).
+A helper script now lives at `scripts/phase0_setup.sh`. Run it locally on the Pi to execute the repeatable parts of Phase 0 (system upgrades, package install, official DSI display config, Docker setup).
 
 ### Usage
 ```bash
@@ -178,11 +177,11 @@ cd ~/Projects/vokrr
 sudo PI_USER=$USER ./scripts/phase0_setup.sh
 ```
 - `PI_USER` defaults to `homeops`; override if your login differs so the script can add you to the `docker` group.
-- Script actions: `apt update/full-upgrade`, EEPROM refresh, installs base + kiosk packages, configures UFW for SSH, appends the Waveshare HDMI block to `/boot/config.txt` if missing, installs Docker + Compose.
+- Script actions: `apt update/full-upgrade`, EEPROM refresh, installs base + kiosk packages, configures UFW for SSH, removes old Waveshare HDMI overrides, sets the official DSI display mode to `800x480@60`, installs Docker + Compose.
 - Reboot afterward to apply GPU/firmware changes.
 
 ### Manual steps that remain
-1. Touch calibration (`xinput_calibrator`) and saving 99-waveshare conf if the pointer is offset.
+1. Touch verification; calibration should only be needed if the pointer is offset.
 2. Microphone/speaker verification commands.
 3. Repository cloning (if not already done) and SSH key hardening.
 4. Any environment-specific network/static-IP configurations beyond the defaults.

@@ -8,7 +8,7 @@ The repository contains a working end-to-end stack:
 
 - **Docker Compose stack** for Home Assistant, backend, frontend, and voice intent bridge.
 - **FastAPI backend** with Home Assistant REST/WebSocket client, normalized rooms/devices, device actions, scenes/routines, health checks, and a realtime WebSocket hub for the frontend.
-- **React/Vite touchscreen UI** optimized for the 1024×600 Waveshare display, featuring:
+- **React/Vite touchscreen UI** optimized for the official 7-inch Raspberry Pi DSI touch display at 800×480, featuring:
   - Glass (frosted) UI across the sidebar, header, cards, dropdowns, and the login panel (`backdrop-filter` with translucent surfaces).
   - A lightweight full-viewport CSS backdrop instead of the previous WebGL aurora, to reduce GPU/CPU load on the Raspberry Pi.
   - A `Jarvis` status bar in the header showing idle/listening/processing/STT transcript states (replaces the old search bar).
@@ -50,11 +50,15 @@ Use the Vokrr bootstrap admin credentials from `.env` to sign in initially. Home
 To make the stack and kiosk come back automatically after a Raspberry Pi reboot, install and enable the bundled systemd units:
 
 ```bash
+sudo PI_USER=$USER ./scripts/phase0_setup.sh
 sudo cp infra/systemd/vokrr-stack.service /etc/systemd/system/
 sudo cp infra/systemd/vokrr-kiosk.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now vokrr-stack.service vokrr-kiosk.service
+sudo systemctl enable --now vokrr-stack.service
+sudo systemctl enable --now vokrr-kiosk.service
 ```
+
+The setup script removes the old Waveshare HDMI 1024×600 timing overrides and sets the official DSI panel to `800x480@60`. Reboot after running it so Raspberry Pi firmware and KMS pick up the display change.
 
 ## Remote Access
 

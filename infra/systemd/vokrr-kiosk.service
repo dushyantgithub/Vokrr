@@ -1,16 +1,17 @@
 [Unit]
 Description=Vokrr touchscreen kiosk
-After=network-online.target docker.service vokrr-stack.service
-Wants=network-online.target vokrr-stack.service
+After=graphical.target lightdm.service network-online.target docker.service vokrr-stack.service
+Wants=graphical.target network-online.target vokrr-stack.service
 
 [Service]
 User=quantum-hive
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WAYLAND_DISPLAY=wayland-0
+Environment=DISPLAY=:0
 Environment=VOKRR_KIOSK_URL=http://localhost:3000
 ExecStart=/home/quantum-hive/Projects/vokrr/scripts/start_kiosk.sh
 Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical.target

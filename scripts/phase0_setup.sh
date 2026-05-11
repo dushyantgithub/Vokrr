@@ -24,43 +24,53 @@ run_step() {
   echo "\n==> ${msg}"
 }
 
-append_waveshare_block() {
+boot_config_file() {
   local config_file="/boot/firmware/config.txt"
   if [[ ! -f "${config_file}" ]]; then
     config_file="/boot/config.txt"
   fi
-  local marker="# Waveshare-70H-1024600"
-  if grep -q "${marker}" "${config_file}"; then
-    echo "Waveshare HDMI settings already present; skipping";
-    return
-  fi
-  cat <<'BLOCK' >> "${config_file}"
-# Waveshare-70H-1024600
-hdmi_force_hotplug=1
-hdmi_group=2
-hdmi_mode=87
-hdmi_cvt=1024 600 60 6 0 0 0
-max_framebuffer_width=1024
-max_framebuffer_height=600
-framebuffer_width=1024
-framebuffer_height=600
-hdmi_drive=1
-dtoverlay=vc4-kms-v3d
-# End Waveshare-70H-1024600
-BLOCK
+  printf '%s\n' "${config_file}"
 }
 
-append_waveshare_cmdline_mode() {
+boot_cmdline_file() {
   local cmdline_file="/boot/firmware/cmdline.txt"
-  local video_mode="video=HDMI-A-2:1024x600M@60D"
   if [[ ! -f "${cmdline_file}" ]]; then
     cmdline_file="/boot/cmdline.txt"
   fi
-  if grep -q "${video_mode}" "${cmdline_file}"; then
-    echo "Waveshare kernel video mode already present; skipping";
-    return
+  printf '%s\n' "${cmdline_file}"
+}
+
+configure_official_touch_display() {
+  local config_file
+  config_file="$(boot_config_file)"
+  local cmdline_file
+  cmdline_file="$(boot_cmdline_file)"
+  local dsi_mode="video=DSI-1:800x480@60"
+
+  sed -i '/# Waveshare-70H-1024600/,/# End Waveshare-70H-1024600/d' "${config_file}"
+  sed -i -E \
+    -e 's/[[:space:]]*hdmi_force_hotplug=1//g' \
+    -e 's/[[:space:]]*hdmi_group=2//g' \
+    -e 's/[[:space:]]*hdmi_mode=87//g' \
+    -e 's/[[:space:]]*hdmi_cvt=1024 600 60 6 0 0 0//g' \
+    -e 's/[[:space:]]*max_framebuffer_width=1024//g' \
+    -e 's/[[:space:]]*max_framebuffer_height=600//g' \
+    -e 's/[[:space:]]*framebuffer_width=1024//g' \
+    -e 's/[[:space:]]*framebuffer_height=600//g' \
+    -e 's/[[:space:]]*hdmi_drive=1//g' \
+    "${config_file}"
+
+  if ! grep -q '^dtoverlay=vc4-kms-v3d' "${config_file}"; then
+    printf '\n# Official Raspberry Pi 7-inch DSI touch display\ndtoverlay=vc4-kms-v3d\n' >> "${config_file}"
   fi
-  sed -i "s/$/ ${video_mode}/" "${cmdline_file}"
+
+  sed -i -E \
+    -e 's/[[:space:]]*video=HDMI-A-[0-9]:1024x600M@60D//g' \
+    -e 's/[[:space:]]*video=DSI-[0-9]:800x480@60(,[^[:space:]]*)?//g' \
+    "${cmdline_file}"
+  sed -i "s/$/ ${dsi_mode}/" "${cmdline_file}"
+
+  echo "Configured official Raspberry Pi 7-inch DSI touch display at 800x480."
 }
 
 install_docker() {
@@ -91,12 +101,11 @@ run_step "Enabling UFW for SSH baseline"
 ufw allow OpenSSH || true
 ufw --force enable
 
-run_step "Ensuring Waveshare HDMI timings configured"
-append_waveshare_block
-append_waveshare_cmdline_mode
+run_step "Ensuring official Raspberry Pi 7-inch DSI display configured"
+configure_official_touch_display
 
 run_step "Installing Docker engine and compose plugin"
 install_docker
 
 run_step "All Phase 0 automated steps complete"
-echo "Reboot now to apply firmware/HDMI changes, then run 'xinput_calibrator' if touch needs calibration."
+echo "Reboot now to apply firmware/display changes. The official DSI touch display should not need manual calibration."

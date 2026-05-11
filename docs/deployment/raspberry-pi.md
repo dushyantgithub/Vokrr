@@ -41,7 +41,20 @@ Local endpoints remain:
 - `http://127.0.0.1:8080` for the local backend.
 - `http://vokrr.local:8123` for Home Assistant admin/setup on the LAN only.
 
-## 3. Publish The Backend Securely
+## 3. Configure The Official 7-inch Display
+
+The supported touchscreen is now the official Raspberry Pi 7-inch DSI capacitive touch display. It runs at `800x480@60` and should not need manual touch calibration on current Raspberry Pi OS.
+
+Run the setup script on the Pi and reboot:
+
+```bash
+sudo PI_USER=$USER ./scripts/phase0_setup.sh
+sudo reboot
+```
+
+This removes the old Waveshare HDMI `1024x600` timing and kernel mode from `/boot/firmware/config.txt` and `/boot/firmware/cmdline.txt`, then adds the DSI display mode. Keeping the old HDMI mode is the likely cause of cropped or missing screen edges after the hardware swap.
+
+## 4. Publish The Backend Securely
 
 If your ISP connection uses CGNAT, use Cloudflare Tunnel. That is the recommended setup for this project and the active `vokrr.com` deployment.
 
@@ -49,7 +62,7 @@ Follow [cloudflare-tunnel.md](./cloudflare-tunnel.md) and expose only the backen
 
 If you have a real public IPv4 and want direct router exposure instead, you can still use Caddy with `infra/Caddyfile.example`, but that is a fallback path and it does not work behind CGNAT.
 
-## 4. Optional User Registration
+## 5. Optional User Registration
 
 If you want to allow a second user to create an account without using the admin API, set:
 
@@ -68,7 +81,7 @@ curl -X POST https://api.vokrr.com/api/auth/register \
 
 Disable registration again after onboarding users.
 
-## 5. Create Additional Users As Admin
+## 6. Create Additional Users As Admin
 
 Login first:
 
@@ -87,13 +100,19 @@ curl -X POST https://api.vokrr.com/api/admin/users \
   -d '{"username":"iphone-user","password":"another-strong-password","is_admin":false}'
 ```
 
-## 6. Kiosk Autostart
+## 7. Kiosk Autostart
 
 Install the systemd unit after Chromium and X are installed:
 
 ```bash
 sudo cp infra/systemd/vokrr-kiosk.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable vokrr-kiosk.service
-sudo systemctl start vokrr-kiosk.service
+sudo systemctl enable --now vokrr-kiosk.service
+```
+
+The kiosk unit starts after `graphical.target`/LightDM and the launcher now detects Wayland or X11 before opening Chromium. If you only see the Raspberry Pi wallpaper after reboot, check it with:
+
+```bash
+systemctl status vokrr-kiosk.service
+journalctl -u vokrr-kiosk.service -b --no-pager
 ```
