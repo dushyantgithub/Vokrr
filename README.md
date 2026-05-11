@@ -1,6 +1,6 @@
 # Vokrr
 
-Local-first smart home control system for Raspberry Pi 4/5 with Home Assistant as the integration engine, a custom FastAPI backend, a React/Vite touchscreen UI with a glass (iOS-style) aesthetic, and a local voice command pipeline.
+Local-first smart home control system for Raspberry Pi 4/5 with Home Assistant as the integration engine, a custom FastAPI backend, a native Qt/QML touchscreen UI, and a local voice command pipeline.
 
 ## Current Build
 
@@ -8,7 +8,8 @@ The repository contains a working end-to-end stack:
 
 - **Docker Compose stack** for Home Assistant, backend, frontend, and voice intent bridge.
 - **FastAPI backend** with Home Assistant REST/WebSocket client, normalized rooms/devices, device actions, scenes/routines, health checks, and a realtime WebSocket hub for the frontend.
-- **React/Vite touchscreen UI** optimized for the 1024×600 Waveshare display, featuring:
+- **Native PySide6/QML touchscreen UI** under `vokrr_ui/`, optimized for the official Raspberry Pi 7 inch 800×480 touchscreen. It avoids Chromium, Electron, browser kiosk mode, WebViews, heavy blur, and video backgrounds.
+- **Legacy React/Vite touchscreen UI** under `frontend/`, retained for reference and existing deployments, featuring:
   - Glass (frosted) UI across the sidebar, header, cards, dropdowns, and the login panel (`backdrop-filter` with translucent surfaces).
   - A lightweight full-viewport CSS backdrop instead of the previous WebGL aurora, to reduce GPU/CPU load on the Raspberry Pi.
   - A `Jarvis` status bar in the header showing idle/listening/processing/STT transcript states (replaces the old search bar).
@@ -46,6 +47,63 @@ Open:
 - Backend API docs: `http://vokrr.local:8080/docs`
 
 Use the Vokrr bootstrap admin credentials from `.env` to sign in initially. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
+
+## Native Qt/QML Touchscreen UI
+
+The native UI is the preferred Raspberry Pi display frontend. It runs with PySide6 and QML directly on the Pi, plays a startup WAV on every launch, and continues loading the interface if audio setup fails.
+
+Install dependencies:
+
+```bash
+cd ~/Projects/vokrr
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Configure Home Assistant access for the native UI:
+
+```bash
+export HA_TOKEN="your-long-lived-home-assistant-token"
+```
+
+The URL and token environment variable name live in `vokrr_ui/config/app_config.json`.
+
+Run manually:
+
+```bash
+./scripts/start_vokrr_ui.sh
+```
+
+On a desktop session the script uses `QT_QPA_PLATFORM=xcb`. Without `DISPLAY`, it uses `eglfs` for a fullscreen Pi display path. The app forces an 800×480 fullscreen window and hides the cursor on Raspberry Pi touchscreen hardware.
+
+Install as a boot service:
+
+```bash
+sudo nano infra/systemd/vokrr-ui.service
+```
+
+Adjust `User=`, `WorkingDirectory=`, and `ExecStart=` if your Pi checkout is not `/home/pi/Projects/vokrr`, then run:
+
+```bash
+./scripts/install_vokrr_ui_service.sh
+```
+
+The service starts after `graphical.target` and `sound.target`, restarts on failure, and plays the startup tune on every app launch or restart.
+
+### MAX98357A Startup Audio
+
+Enable I2S and test the Adafruit MAX98357A speaker path using [docs/raspberry_pi_audio_setup.md](./docs/raspberry_pi_audio_setup.md).
+
+Quick audio checks:
+
+```bash
+speaker-test -t sine -f 1000 -c 2
+aplay vokrr_ui/assets/audio/startup.wav
+amixer set Digital 100%
+```
+
+The startup sound path is configured by `startup_sound` in `vokrr_ui/config/app_config.json`. Replace `vokrr_ui/assets/audio/startup.wav` with any WAV file to change it. If the file is missing or invalid, `vokrr_ui/services/audio.py` generates a simple mono five-second startup tone automatically.
 
 To make the stack and kiosk come back automatically after a Raspberry Pi reboot, install and enable the bundled systemd units:
 

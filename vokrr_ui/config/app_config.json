@@ -1,0 +1,9 @@
+{
+  "home_assistant_url": "http://homeassistant.local:8123",
+  "home_assistant_token_env": "HA_TOKEN",
+  "screen_width": 800,
+  "screen_height": 480,
+  "startup_sound": "vokrr_ui/assets/audio/startup.wav",
+  "startup_sound_duration_seconds": 5,
+  "startup_volume_percent": 100
+}
