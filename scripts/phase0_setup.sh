@@ -3,8 +3,11 @@ set -euo pipefail
 
 PI_USER="${PI_USER:-homeops}"
 KIOSK_PACKAGES=(
-  xserver-xorg x11-xserver-utils chromium-browser openbox lightdm
-  xinput xinput-calibrator xserver-xorg-input-libinput
+  xserver-xorg x11-xserver-utils openbox lightdm
+  xinput xinput-calibrator xserver-xorg-input-libinput libinput-tools evtest
+  cmake ninja-build g++ qt6-base-dev qt6-declarative-dev qt6-websockets-dev
+  qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-controls
+  qml6-module-qtquick-layouts qml6-module-qtwebsockets qml6-module-qtcore
 )
 BASE_PACKAGES=(
   git curl unzip htop tmux python3-pip python3-venv build-essential

@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libasound2 libatomic1 libportaudio2 \
+    && apt-get install -y --no-install-recommends espeak-ng libasound2 libatomic1 libportaudio2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

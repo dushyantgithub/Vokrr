@@ -1,4 +1,14 @@
 rooms:
+  - id: living_room
+    name: Living Room
+    icon: sofa
+    devices: []
+
+  - id: kitchen
+    name: Kitchen
+    icon: kitchen
+    devices: []
+
   - id: gaming_room
     name: Gaming Room
     icon: gamepad
@@ -59,6 +69,13 @@ rooms:
         name: Aircon Socket
         type: switch
         entity_id: switch.bedroom_aircon_socket_1
+        capabilities:
+          - toggle
+
+      - id: bedroom_aircon_child_lock
+        name: Aircon Child Lock
+        type: switch
+        entity_id: switch.bedroom_aircon_child_lock
         capabilities:
           - toggle
 

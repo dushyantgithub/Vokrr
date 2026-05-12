@@ -2,7 +2,7 @@
 
 ## 1. Home Assistant Installation Method
 - **Recommendation:** Home Assistant Container managed through Docker Compose on Raspberry Pi OS Lite (64-bit).
-- **Why not Home Assistant OS/Supervised:** Those variants assume the Pi is fully dedicated to Home Assistant and restrict the ability to run custom containers/UIs/voice stack alongside HA under our control. We need a flexible platform hosting FastAPI, React UI assets, wake-word/STT/TTS services, and custom orchestration, so we cannot surrender host management to Home Assistant OS.
+- **Why not Home Assistant OS/Supervised:** Those variants assume the Pi is fully dedicated to Home Assistant and restrict the ability to run custom containers/UIs/voice stack alongside HA under our control. We need a flexible platform hosting FastAPI, the native Qt touchscreen console, wake-word/STT/TTS services, and custom orchestration, so we cannot surrender host management to Home Assistant OS.
 - **Benefits of the container approach:**
   - Uses the upstream Docker image maintained by Nabu Casa with ARM64 support, so we still receive official updates and integrations.
   - Compose lets us pin versions, manage environment files, share volumes, and control resource limits per service (critical on the Pi 4).
@@ -49,7 +49,11 @@ The display uses the Raspberry Pi DSI connector for video and capacitive touch. 
 4. **Install touch/GUI dependencies:**
    ```bash
    sudo apt install -y xserver-xorg x11-xserver-utils xinput xinput-calibrator \
-       chromium-browser openbox lightdm xserver-xorg-input-libinput
+       openbox lightdm xserver-xorg-input-libinput cmake ninja-build g++ \
+       qt6-base-dev qt6-declarative-dev qt6-websockets-dev \
+       qml6-module-qtquick qml6-module-qtquick-window \
+       qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+       qml6-module-qtwebsockets qml6-module-qtcore
    ```
 5. **Calibrate touch only if touches do not line up:**
    ```bash
@@ -61,7 +65,7 @@ The display uses the Raspberry Pi DSI connector for video and capacitive touch. 
 7. **Rotate orientation if required:**
    - Keep landscape as the default for the kiosk.
    - For display rotation on KMS, adjust the DSI `video=` cmdline with a supported `rotate=` value.
-8. **Test end-to-end:** open Chromium fullscreen to confirm touch interactions: `DISPLAY=:0 chromium-browser --start-fullscreen http://localhost:3000`.
+8. **Test end-to-end:** build and launch the native console: `cmake -S qt-frontend -B qt-frontend/build -G Ninja && cmake --build qt-frontend/build && VOKRR_QT_WINDOWED=1 qt-frontend/build/vokrr-qt`.
 
 ## 3. System Updates & Base Packages
 Run immediately after first login.
@@ -97,9 +101,10 @@ vokrr/
 │   ├── app/
 │   ├── tests/
 │   └── pyproject.toml
-├── frontend/                 # React + Vite UI
+├── qt-frontend/              # Native Qt/QML touchscreen console
+│   ├── qml/
 │   ├── src/
-│   └── package.json
+│   └── CMakeLists.txt
 ├── voice-pipeline/           # Wake-word, STT, TTS microservices
 │   ├── wakeword/
 │   ├── stt/
@@ -108,7 +113,7 @@ vokrr/
 ├── home-assistant/           # compose config, secrets templates, automations
 │   └── configuration/
 ├── infra/
-│   ├── docker-compose.yml    # orchestrates HA + backend + voice + frontend runtime
+│   ├── docker-compose.yml    # orchestrates HA + backend + voice runtime
 │   ├── env/
 │   └── systemd/              # kiosk + service units
 ├── docs/
@@ -123,14 +128,14 @@ vokrr/
 ## 6. Service Architecture Overview
 - **Home Assistant (Docker container):** runs integrations, exposes REST/WebSocket APIs. Mount `/homeops/vokrr/home-assistant/config` for persistence. Home Assistant remains the device/integration engine and is not the primary UI.
 - **Backend (FastAPI + async workers):** modules for local app authentication, device abstraction, HA client, intent handler, WebSocket broadcaster. Uses YAML/JSON metadata for rooms/devices and may add SQLite later for user/session metadata if needed.
-- **Frontend (React/Vite):** kiosk web app talking to the backend via authenticated REST + WebSocket for realtime state.
+- **Native Console (Qt/QML):** fullscreen kiosk app talking to the backend via authenticated REST + WebSocket for realtime state.
 - **iOS App (Swift/SwiftUI, planned):** native local-network client that discovers or accepts the Vokrr server address, requires username/password login on first launch, stores the issued app token in Keychain, then displays the same rooms/devices/actions exposed by the backend.
 - **Voice Pipeline:** wake-word engine (Porcupine/openWakeWord), recorder, STT (Vosk/Coqui), intent parser, TTS (Piper) as separate Python services communicating over gRPC/HTTP.
 - **Shared infrastructure:** Compose-defined network, `.env` files for secrets, Docker logging routed to journald, optional systemd units for kiosk and Compose stack autostart.
 
 ### 6.1 Local Network Exposure & App Login
 - Vokrr is exposed on the local network through the Raspberry Pi hostname/IP:
-  - Touchscreen/web UI: `http://vokrr.local:3000`
+  - Touchscreen console: native Qt/QML app on the Raspberry Pi display
   - Backend API: `http://vokrr.local:8080`
   - Home Assistant admin/setup UI: `http://vokrr.local:8123`
 - Normal users should use the Vokrr app login, not the Home Assistant UI. Home Assistant credentials remain for administrator setup/integrations only.
@@ -161,12 +166,12 @@ Follow these steps now that the touchscreen is connected:
    cd vokrr
    ```
 8. **Hardware Verification**
-   - Display/touch: `xinput list`, run Chromium fullscreen test.
+   - Display/touch: `xinput list`, run the native Qt console.
    - Microphone: `arecord -l` then `arecord -d 5 test.wav`; playback with `aplay test.wav`.
    - Speaker: `speaker-test -c2 -twav` to confirm output.
 9. **Security Baseline** already set with UFW; consider SSH key auth and disable password login once confident.
 
-With Phase 0 actively underway per the checklist above, the Raspberry Pi will exit this phase with a clean OS, the official Raspberry Pi touchscreen running at 800×480, Docker/Compose installed, security hardened, and the repository ready for subsequent phases (Home Assistant containerization, backend/frontend scaffolding, voice pipeline, kiosk autostart, etc.).
+With Phase 0 actively underway per the checklist above, the Raspberry Pi will exit this phase with a clean OS, the official Raspberry Pi touchscreen running at 800x480, Docker/Compose installed, security hardened, and the repository ready for subsequent phases (Home Assistant containerization, backend/native-console scaffolding, voice pipeline, kiosk autostart, etc.).
 
 ## 8. Phase 0 Automation Script
 A helper script now lives at `scripts/phase0_setup.sh`. Run it locally on the Pi to execute the repeatable parts of Phase 0 (system upgrades, package install, official DSI display config, Docker setup).
@@ -215,11 +220,11 @@ The iOS app should render each of the touchscreen's primary views. The navigatio
 | `DevicesView` | All devices grid with search/filter. |
 | `RoutinesView` (`scenes`) | Grid of scene cards that post `POST /api/scenes/{id}/run`. |
 | `ActivityView` (health, assistant state, device counts) | Grid of status cards. |
-| `NewsView` (embedded `worldmonitor.app`) | `WKWebView` loading `https://www.worldmonitor.app` directly — WKWebView is not subject to the X‑Frame-Options / frame-ancestors restrictions the web iframe is, so the nginx proxy is **not** required from iOS. |
+| `NewsView` | `WKWebView` loading `https://www.worldmonitor.app` directly. |
 | `Header` Jarvis status bar | Top-safe-area overlay showing `JARVIS_STATUS_LABELS` states (`idle`, `listening`, `processing`, `done`, `error`, `command_error`) plus transcribed STT text. |
 | Notifications bell + dropdown | Toolbar bell button + modal/side sheet with recent entries (device updates, voice errors, scene runs). |
 | Settings popover (`Hard refresh`, `Sign out`) | Settings tab with server address, account, cache clear (equivalent to hard refresh: purges `URLCache.shared`, in-memory snapshots, `WKWebsiteDataStore` for News), `Sign out`. |
-| `SoftAurora` background | Metal shader port of the same GLSL used in `frontend/src/components/SoftAurora/SoftAurora.jsx` with `uNoiseAmp` / `uBandHeight` driven by live mic RMS. |
+| `SoftAurora` background | Metal shader port of the native touchscreen visual language with `uNoiseAmp` / `uBandHeight` driven by live mic RMS. |
 | Voice command → `navigate` view switch | WebSocket handler switches the selected tab when `voice.command.navigate` is a known view. |
 
 ### 9.3 Recommended iOS Stack
@@ -273,7 +278,7 @@ VokrriOS/
 │       └── NotificationsSheet.swift
 ├── Effects/
 │   ├── AuroraBackground.swift          # MTKView + shader
-│   ├── SoftAurora.metal                # port of SoftAurora.jsx fragment shader
+│   ├── SoftAurora.metal                # native aurora fragment shader
 │   └── MicLevelReader.swift            # AVAudioEngine RMS reader → @Published level
 └── Resources/
     ├── Assets.xcassets                 # SF Symbols + brand mark
@@ -294,7 +299,7 @@ VokrriOS/
 
 - WebSocket events and the app's reaction:
   - `snapshot` → replace rooms/devices in `AppState`.
-  - `device.updated` → merge into the matching room/device (same shape as `mergeDevice()` in `main.jsx`).
+  - `device.updated` → merge into the matching room/device using the same state shape as the native Qt console.
   - `voice.status` → update `JarvisStatusBar` label (`listening`, `processing`, etc.).
   - `voice.command` → update status bar + append to notifications when `understood == false` (`command_error` / `error`).  When payload contains `navigate` and the value matches a known tab (`Dashboard`, `Devices`, `Routines`, `Activity`, `News`), switch the selected tab.
   - `scene.ran` → append to notifications.
@@ -304,7 +309,7 @@ VokrriOS/
 
 - Request mic permission on first app launch with a clear usage string in `Info.plist` ("Reactive background animation and optional voice control").
 - `MicLevelReader` uses `AVAudioEngine.inputNode.installTap(onBus: 0, ...)` with a 1024-sample buffer, computes RMS per buffer, smooths with an exponential filter (`smoothed = 0.85·smoothed + 0.15·rms`), and publishes a `@Published var level: Float` in `[0, 1]`.
-- `AuroraBackground` hosts an `MTKView`. The fragment shader is a direct port of `SoftAurora.jsx` (keep uniform names identical: `uTime`, `uNoiseFreq`, `uNoiseAmp`, `uBandHeight`, `uBandSpread`, `uColor1`, `uColor2`, etc.). Each frame the renderer updates these uniforms using the base values and the current mic level, with the same gain formulas as the web component:
+- `AuroraBackground` hosts an `MTKView`. The fragment shader should keep stable uniform names (`uTime`, `uNoiseFreq`, `uNoiseAmp`, `uBandHeight`, `uBandSpread`, `uColor1`, `uColor2`, etc.). Each frame the renderer updates these uniforms using the base values and the current mic level:
   - `uNoiseAmp = base · (1 + level · 1.5)`
   - `uNoiseFreq = base · (1 + level · 0.6)`
   - `uBandHeight = base + level · 0.45`

@@ -19,7 +19,6 @@ fi
 APP_USERNAME="${APP_BOOTSTRAP_ADMIN_USERNAME:-${APP_USERNAME:-admin}}"
 APP_PASSWORD="${APP_BOOTSTRAP_ADMIN_PASSWORD:-${APP_PASSWORD:-admin}}"
 BACKEND_URL="${BACKEND_URL:-http://localhost:8080}"
-FRONTEND_URL="${FRONTEND_URL:-http://localhost:3000}"
 HA_URL="${HOME_ASSISTANT_URL:-http://localhost:8123}"
 
 check_http() {
@@ -27,22 +26,34 @@ check_http() {
   local url="$2"
   local expected="${3:-200}"
   local code
-  code="$(curl -sS -o /tmp/vokrr-health.out -w '%{http_code}' --max-time 10 "${url}" || true)"
+  for _ in {1..20}; do
+    code="$(curl -sS -o /tmp/vokrr-health.out -w '%{http_code}' --max-time 10 "${url}" || true)"
+    if [[ "${code}" == "${expected}" ]]; then
+      echo "[ OK ] ${name}: HTTP ${code}"
+      return
+    fi
+    sleep 3
+  done
   if [[ "${code}" != "${expected}" ]]; then
     echo "[FAIL] ${name}: expected HTTP ${expected}, got ${code}"
     cat /tmp/vokrr-health.out 2>/dev/null || true
     exit 1
   fi
-  echo "[ OK ] ${name}: HTTP ${code}"
 }
 
 echo "== Vokrr health check =="
 
 docker compose ps
 
-check_http "frontend" "${FRONTEND_URL}" 200
 check_http "backend health" "${BACKEND_URL}/api/system/health" 200
 check_http "home assistant API unauthenticated probe" "${HA_URL}/api/" 401
+if systemctl is-active --quiet vokrr-kiosk.service; then
+  echo "[ OK ] native Qt kiosk: systemd active"
+else
+  echo "[FAIL] native Qt kiosk: systemd inactive"
+  systemctl --no-pager --full status vokrr-kiosk.service || true
+  exit 1
+fi
 
 TOKEN="$(
   curl -sS --max-time 10 \

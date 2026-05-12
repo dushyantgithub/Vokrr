@@ -1,6 +1,6 @@
 COMPOSE=docker compose -f infra/docker-compose.yml
 
-.PHONY: up down logs build test backend-test frontend-build
+.PHONY: up down logs build test backend-test qt-build
 
 up:
 	$(COMPOSE) up -d --build
@@ -14,11 +14,11 @@ logs:
 build:
 	$(COMPOSE) build
 
-test: backend-test frontend-build
+test: backend-test qt-build
 
 backend-test:
 	cd backend && python3 -m pytest
 
-frontend-build:
-	cd frontend && npm install && npm run build
-
+qt-build:
+	cmake -S qt-frontend -B qt-frontend/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+	cmake --build qt-frontend/build

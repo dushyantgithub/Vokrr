@@ -34,16 +34,6 @@ services:
     depends_on:
       - homeassistant
 
-  frontend:
-    build:
-      context: ../frontend
-    container_name: vokrr-frontend
-    restart: unless-stopped
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
-
   voice-intent:
     build:
       context: ../voice-pipeline/intent

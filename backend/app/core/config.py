@@ -15,9 +15,7 @@ class Settings(BaseSettings):
     app_name: str = "Vokrr"
     backend_host: str = "0.0.0.0"
     backend_port: int = 8080
-    backend_cors_origins: str = Field(
-        default="http://localhost:5173,http://localhost:3000,http://vokrr.local:3000"
-    )
+    backend_cors_origins: str = Field(default="")
     home_assistant_url: AnyHttpUrl = "http://localhost:8123"
     home_assistant_token: str = ""
     device_config_path: str = "/app/config/devices.yaml"
@@ -38,6 +36,7 @@ class Settings(BaseSettings):
     app_registration_enabled: bool = False
     app_registration_code: str = ""
     kiosk_auto_login: bool = True
+    state_sync_interval_seconds: int = 5
     system_restart_command: str = "nohup /bin/sh -c 'sleep 2 && /sbin/reboot' >/dev/null 2>&1 &"
 
     @property

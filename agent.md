@@ -49,14 +49,14 @@ HIGH LEVEL ARCHITECTURE
   - Docker / Docker Compose
   - Home Assistant
   - Custom backend service
-  - Custom touchscreen frontend
+  - Native Qt/QML touchscreen console
   - Wake word engine
   - Speech-to-text service
   - Text-to-speech service
 - Touch UI flow
   - user signs into Vokrr app locally
   - user touches UI on Raspberry Pi display
-  - frontend calls backend
+  - native console calls backend
   - backend calls Home Assistant APIs
   - realtime state reflected back in UI
 - iOS flow
@@ -121,9 +121,9 @@ Unless there is a strong technical reason otherwise, use:
 - Docker Compose
 - Home Assistant Container if practical, otherwise recommend the best install method and justify it clearly
 - Python FastAPI backend
-- React + Vite frontend for the touchscreen UI
+- Qt/QML native console for the touchscreen UI
 - Swift + SwiftUI for the iOS app
-- WebSocket for realtime frontend/backend updates
+- WebSocket for realtime native-console/backend updates
 - Home Assistant REST + WebSocket APIs
 - Python services for voice pipeline orchestration
 - SQLite or lightweight local storage only where needed for metadata/cache
@@ -158,7 +158,7 @@ Deliverables:
 PHASE 1 — SYSTEM ARCHITECTURE AND REPOSITORY STRUCTURE
 Design the project repo and codebase layout for:
 - backend
-- frontend
+- qt-frontend
 - voice services
 - configuration
 - docs
@@ -168,7 +168,7 @@ Design the project repo and codebase layout for:
 Expected style:
 root/
   backend/
-  frontend/
+  qt-frontend/
   voice/
   infra/
   docs/
@@ -207,12 +207,12 @@ Build a FastAPI backend that:
 - exposes local app authentication
 - connects to Home Assistant
 - subscribes to Home Assistant state updates via WebSocket
-- exposes REST APIs for frontend
-- exposes WebSocket for realtime frontend sync
+- exposes REST APIs for native clients
+- exposes WebSocket for realtime native-console sync
 - contains the voice intent processing pipeline
 - contains room/device abstraction
 - contains action execution layer
-- returns normalized device models to the frontend
+- returns normalized device models to the native console
 
 Required backend modules:
 - app auth service
@@ -244,8 +244,8 @@ Deliverables:
 - logging/error-handling strategy
 - config format for rooms/devices/capabilities
 
-PHASE 4 — TOUCHSCREEN FRONTEND
-Build a custom touchscreen UI using React + Vite.
+PHASE 4 — TOUCHSCREEN NATIVE CONSOLE
+Build a custom touchscreen UI using Qt/QML.
 
 Requirements:
 - login screen using the Vokrr app username/password
@@ -272,11 +272,11 @@ Need:
 - kiosk launch strategy on boot
 
 Deliverables:
-- frontend folder structure
+- qt-frontend folder structure
 - screen/page/component plan
 - starter implementation
 - instructions to run automatically on boot in kiosk mode
-- recommendation for browser/kiosk setup on Pi
+- recommendation for native kiosk setup on Pi
 
 PHASE 4.5 — IOS APP
 Build a native iOS client for the local Vokrr backend.
@@ -356,8 +356,8 @@ Make the system boot directly into the product experience.
 
 Requirements:
 - backend starts on boot
-- frontend starts on boot
-- browser opens in kiosk mode on boot
+- native Qt console starts on boot
+- kiosk opens fullscreen on boot
 - voice pipeline starts on boot
 - Home Assistant starts on boot
 - all services restart automatically on failure
@@ -375,7 +375,7 @@ Create a proper testing and validation plan.
 Need:
 - backend API tests
 - Home Assistant connectivity tests
-- frontend interaction tests
+- native console interaction tests
 - voice pipeline tests
 - end-to-end tests for:
   - touch to device control

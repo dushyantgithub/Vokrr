@@ -37,7 +37,7 @@ The backend auth database is persisted in `backend/data/auth.db`.
 
 Local endpoints remain:
 
-- `http://vokrr.local:3000` for the touchscreen/web UI.
+- Native Qt touchscreen console on the attached Raspberry Pi display.
 - `http://127.0.0.1:8080` for the local backend.
 - `http://vokrr.local:8123` for Home Assistant admin/setup on the LAN only.
 
@@ -100,17 +100,19 @@ curl -X POST https://api.vokrr.com/api/admin/users \
   -d '{"username":"iphone-user","password":"another-strong-password","is_admin":false}'
 ```
 
-## 7. Kiosk Autostart
+## 7. Native Qt Kiosk Autostart
 
-Install the systemd unit after Chromium and X are installed:
+Build the Qt console, then install the systemd unit:
 
 ```bash
+cmake -S qt-frontend -B qt-frontend/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build qt-frontend/build
 sudo cp infra/systemd/vokrr-kiosk.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now vokrr-kiosk.service
 ```
 
-The kiosk unit starts after `graphical.target`/LightDM and the launcher now detects Wayland or X11 before opening Chromium. If you only see the Raspberry Pi wallpaper after reboot, check it with:
+The kiosk unit starts after `graphical.target`/LightDM and launches `scripts/start_qt_kiosk.sh`, which waits for the backend and then starts `qt-frontend/build/vokrr-qt`. If you only see the Raspberry Pi wallpaper after reboot, check it with:
 
 ```bash
 systemctl status vokrr-kiosk.service

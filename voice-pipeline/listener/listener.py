@@ -2,6 +2,7 @@ import logging
 import os
 import queue
 import random
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -20,19 +21,25 @@ PORCUPINE_KEYWORD_PATH = Path(
 )
 LISTENER_ENABLED = os.getenv("VOICE_LISTENER_ENABLED", "1") == "1"
 INPUT_DEVICE = os.getenv("VOICE_INPUT_DEVICE") or None
-COMMAND_RECORD_SECONDS = float(os.getenv("VOICE_COMMAND_RECORD_SECONDS", "6"))
+OUTPUT_DEVICE = os.getenv("VOICE_OUTPUT_DEVICE") or None
+COMMAND_RECORD_SECONDS = float(os.getenv("VOICE_COMMAND_RECORD_SECONDS", "10"))
 COMMAND_MIN_SECONDS = float(os.getenv("VOICE_COMMAND_MIN_SECONDS", "1.2"))
 COMMAND_SILENCE_SECONDS = float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "1.1"))
 COMMAND_SILENCE_RMS = int(os.getenv("VOICE_COMMAND_SILENCE_RMS", "450"))
+VOICE_FEEDBACK_ENABLED = os.getenv("VOICE_FEEDBACK_ENABLED", "1") == "1"
+VOICE_FEEDBACK_WAKE_TEXT = os.getenv("VOICE_FEEDBACK_WAKE_TEXT", "How can I help you sir?")
+VOICE_FEEDBACK_MISUNDERSTOOD_TEXT = os.getenv(
+    "VOICE_FEEDBACK_MISUNDERSTOOD_TEXT",
+    "I am afraid sir, but I didnt get you",
+)
+VOICE_TTS_COMMAND = os.getenv("VOICE_TTS_COMMAND", "espeak-ng")
+VOICE_TTS_RATE = os.getenv("VOICE_TTS_RATE", "150")
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base.en")
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "en")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 ASSIST_PROMPTS = [
-    "How can I help, sir?",
-    "Listening, sir.",
-    "What should I do next?",
-    "Ready for your command.",
+    VOICE_FEEDBACK_WAKE_TEXT,
 ]
 
 app = FastAPI(title="Vokrr Voice Listener", version="0.1.0")
@@ -152,6 +159,9 @@ def run_listener() -> None:
                 prompt = random.choice(ASSIST_PROMPTS)
                 status.update(ok=True, state="listening", message=prompt, last_wake=time.time())
                 post_voice_event("listening", prompt)
+                speak(prompt)
+                drain_audio_queue()
+                pending_audio = np.array([], dtype=np.int16)
                 command_audio = record_command(next_porcupine_frame, sample_rate)
                 text = transcribe_audio(command_audio, sample_rate)
                 status.update(last_text=text)
@@ -159,8 +169,9 @@ def run_listener() -> None:
                 if text:
                     submit_command(text)
                 else:
-                    status.update(ok=True, state="idle", message="I did not hear a command.")
-                    post_voice_event("error", "I did not hear a command.")
+                    status.update(ok=True, state="idle", message=VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
+                    speak(VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
+                    post_voice_event("error", VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
                     reset_to_idle(delay_seconds=1.5)
     except Exception as exc:
         status.update(ok=False, state="listener_error", message=str(exc))
@@ -275,13 +286,18 @@ def submit_command(text: str) -> None:
             )
         if response.status_code >= 400:
             status.update(ok=False, state="command_error", message=response.text)
+            speak(VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
             post_voice_event("error", "Voice command failed")
             return
-        message = response.json().get("message", "Done")
+        payload = response.json()
+        message = payload.get("message", "Done")
+        if not payload.get("understood", False):
+            speak(VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
         status.update(ok=True, state="idle", message=message)
         post_voice_event("done", message)
     except Exception as exc:
         status.update(ok=False, state="command_error", message=str(exc))
+        speak(VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
         post_voice_event("error", "Voice command failed")
     finally:
         reset_to_idle(delay_seconds=2)
@@ -320,3 +336,33 @@ def reset_to_idle(delay_seconds: float = 0) -> None:
     message = f"Listening for {WAKE_WORD_DISPLAY}"
     status.update(ok=True, state="idle", message=message)
     post_voice_event("idle", message)
+
+
+def drain_audio_queue() -> None:
+    while True:
+        try:
+            audio_queue.get_nowait()
+        except queue.Empty:
+            return
+
+
+def speak(text: str) -> None:
+    if not VOICE_FEEDBACK_ENABLED or not text:
+        return
+
+    command = [VOICE_TTS_COMMAND, "-s", VOICE_TTS_RATE, text]
+    env = os.environ.copy()
+    if OUTPUT_DEVICE:
+        env["AUDIODEV"] = OUTPUT_DEVICE
+
+    try:
+        subprocess.run(
+            command,
+            env=env,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+        )
+    except Exception as exc:
+        logger.warning("Voice feedback failed: %s", exc)

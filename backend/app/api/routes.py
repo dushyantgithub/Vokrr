@@ -229,12 +229,14 @@ async def ha_entities(state: AppState = Depends(get_app_state)) -> list[dict]:
 
 @router.get("/api/rooms", response_model=list[Room], dependencies=[Depends(require_user)])
 async def rooms(state: AppState = Depends(get_app_state)) -> list[Room]:
+    await state.state_sync.reconcile_once(broadcast=False)
     return state.device_service.rooms()
 
 
 @router.get("/api/rooms/{room_id}", response_model=Room, dependencies=[Depends(require_user)])
 async def room(room_id: str, state: AppState = Depends(get_app_state)) -> Room:
     try:
+        await state.state_sync.reconcile_once(broadcast=False)
         return state.device_service.room(room_id)
     except DeviceNotFoundError:
         raise HTTPException(status_code=404, detail="Room not found") from None
@@ -284,12 +286,14 @@ async def set_room(
 
 @router.get("/api/devices", response_model=list[Device], dependencies=[Depends(require_user)])
 async def devices(state: AppState = Depends(get_app_state)) -> list[Device]:
+    await state.state_sync.reconcile_once(broadcast=False)
     return state.device_service.devices()
 
 
 @router.get("/api/devices/{device_id}", response_model=Device, dependencies=[Depends(require_user)])
 async def device(device_id: str, state: AppState = Depends(get_app_state)) -> Device:
     try:
+        await state.state_sync.reconcile_once(broadcast=False)
         return state.device_service.device(device_id)
     except DeviceNotFoundError:
         raise HTTPException(status_code=404, detail="Device not found") from None
@@ -469,6 +473,7 @@ async def websocket_endpoint(
 ) -> None:
     await require_websocket_user(websocket, auth)
     await state.websocket_manager.connect(websocket)
+    await state.state_sync.reconcile_once(broadcast=False)
     await websocket.send_json(
         {
             "event": "snapshot",

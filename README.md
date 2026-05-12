@@ -1,20 +1,19 @@
 # Vokrr
 
-Local-first smart home control system for Raspberry Pi 4/5 with Home Assistant as the integration engine, a custom FastAPI backend, a React/Vite touchscreen UI with a glass (iOS-style) aesthetic, and a local voice command pipeline.
+Local-first smart home control system for Raspberry Pi 4/5 with Home Assistant as the integration engine, a custom FastAPI backend, a native Qt/QML touchscreen console, and a local voice command pipeline.
 
 ## Current Build
 
 The repository contains a working end-to-end stack:
 
-- **Docker Compose stack** for Home Assistant, backend, frontend, and voice intent bridge.
-- **FastAPI backend** with Home Assistant REST/WebSocket client, normalized rooms/devices, device actions, scenes/routines, health checks, and a realtime WebSocket hub for the frontend.
-- **React/Vite touchscreen UI** optimized for the official 7-inch Raspberry Pi DSI touch display at 800×480, featuring:
-  - Glass (frosted) UI across the sidebar, header, cards, dropdowns, and the login panel (`backdrop-filter` with translucent surfaces).
-  - A lightweight full-viewport CSS backdrop instead of the previous WebGL aurora, to reduce GPU/CPU load on the Raspberry Pi.
-  - A `Jarvis` status bar in the header showing idle/listening/processing/STT transcript states (replaces the old search bar).
-  - A notifications bell with unread badge and a dropdown feed of recent events.
-  - A `Settings` entry in the sidebar that expands to reveal `Hard refresh`, `Sign out`, and, for admin users, `Restart Raspberry Pi` plus a simple user-creation form.
-  - A `News` tab that embeds [World Monitor](https://www.worldmonitor.app) inside the app via a reverse‑proxy (`/news-proxy/`) that strips `X-Frame-Options` / `Content-Security-Policy`.
+- **Docker Compose stack** for Home Assistant, backend, and voice services.
+- **FastAPI backend** with Home Assistant REST/WebSocket client, normalized rooms/devices, device actions, scenes/routines, health checks, and a realtime WebSocket hub for native clients.
+- **Qt/QML touchscreen console** optimized for the official 7-inch Raspberry Pi DSI touch display at 800x480, featuring:
+  - Native Qt Quick rendering instead of a browser shell.
+  - Dashboard, device grid, routines, activity, news, and settings views.
+  - Local kiosk auto-login through `POST /api/auth/kiosk`.
+  - Live REST + WebSocket updates from the backend.
+  - A `Jarvis` status bar showing idle/listening/processing/STT transcript states.
 - **Voice intent service** with YAML‑driven templates (`home-assistant/config/commands.yaml`), room/device name matching (including space‑folded fuzzy matching for STT outputs like "tube light" vs. "Tubelight"), and a `navigate` action that tells the UI which view to switch to.
 - **Config‑driven room/device mapping** in `home-assistant/config/devices.yaml`.
 - **Kiosk and deployment docs** for the Raspberry Pi.
@@ -42,10 +41,16 @@ docker compose -f infra/docker-compose.yml up -d --build
 Open:
 
 - Home Assistant: `http://vokrr.local:8123`
-- Vokrr UI: `http://vokrr.local:3000`
 - Backend API docs: `http://vokrr.local:8080/docs`
 
 Use the Vokrr bootstrap admin credentials from `.env` to sign in initially. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
+
+Build the native Qt console:
+
+```bash
+cmake -S qt-frontend -B qt-frontend/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build qt-frontend/build
+```
 
 To make the stack and kiosk come back automatically after a Raspberry Pi reboot, install and enable the bundled systemd units:
 
@@ -70,17 +75,14 @@ The recommended remote-access path is Cloudflare Tunnel, not direct router expos
 
 The iOS app and any future external clients should use only the backend hostname. Do not expose Home Assistant directly.
 
-## Frontend Architecture
+## Native Console Architecture
 
-The frontend is a single-page Vite build served by nginx:
+The touchscreen console lives in `qt-frontend/`:
 
-- Our own assets are emitted under `/app-assets/*` (configured via `build.assetsDir` in `vite.config.js`) so they never collide with upstream paths used by the News proxy.
-- `nginx.conf` exposes:
-  - `/` → SPA fallback.
-  - `/news-proxy/*` → reverse proxy to `https://www.worldmonitor.app/` with response headers `X-Frame-Options`, `Content-Security-Policy`, `Strict-Transport-Security`, and the X-Origin policies stripped, plus `sub_filter` rules that rewrite absolute upstream URLs back to same-origin paths and neutralise the injected `<meta http-equiv="Content-Security-Policy">` tag.
-  - `/assets/*`, `/favico/*`, `/_next/*`, `/api/*`, and other common root-relative paths used by the News upstream → forwarded to the same upstream so the embedded page can resolve its assets and XHR calls through the iframe's origin.
-
-The background is now a pure CSS layered backdrop rather than a WebGL canvas so the kiosk can stay responsive on the Raspberry Pi while preserving the same dark/glass visual language.
+- `src/main.cpp` hosts the QML scene in a fullscreen Qt Quick window.
+- `qml/App.qml` talks directly to the backend REST endpoints and `/ws` WebSocket.
+- `scripts/start_qt_kiosk.sh` waits for the backend and display session, then launches `qt-frontend/build/vokrr-qt`.
+- `infra/systemd/vokrr-kiosk.service` starts the native console after LightDM and the Docker backend stack.
 
 ## Voice Commands
 
@@ -89,11 +91,11 @@ Templates are declared in `home-assistant/config/commands.yaml` under `intents.*
 - `turn on {target}` / `turn off {target}` / `toggle {target}` (device or room).
 - `set {target} to {percent} percent` (brightness / percentage-capable devices).
 - `make {target} warm` / `white` / `cool` (color-capable lights).
-- `show me latest news`, `show the news`, `open news`, `go to news`, `latest news`, `news` → triggers a `navigate` action with `view: News`, and the frontend switches tabs (useful for any future view as well).
+- `show me latest news`, `show the news`, `open news`, `go to news`, `latest news`, `news` → triggers a `navigate` action with `view: News`, and the Qt console switches tabs.
 
 Matching is case-insensitive, strips punctuation and filler prefixes (`"hey"`, `"okay"`, `"jarvis"`, `"please"`, `"could you"`, etc.), and falls back to space-folded comparison so STT outputs like `"tube light"` still match the registry name `"Tubelight"`.
 
-Each voice command pushes a `voice.command` event over the backend WebSocket; the frontend uses it to drive the Jarvis status bar, push notifications for `command_error` / `error`, and switch views when the response contains a `navigate` field.
+Each voice command pushes a `voice.command` event over the backend WebSocket; the Qt console uses it to drive the Jarvis status bar, push notifications for `command_error` / `error`, and switch views when the response contains a `navigate` field.
 
 ## Development
 
@@ -115,15 +117,13 @@ cd backend
 python -m pytest
 ```
 
-Frontend:
+Qt/QML console:
 
 ```bash
-cd frontend
-npm install
-npm run dev -- --host 0.0.0.0
+cmake -S qt-frontend -B qt-frontend/build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build qt-frontend/build
+VOKRR_QT_WINDOWED=1 qt-frontend/build/vokrr-qt
 ```
-
-The Vite dev server proxies `/api` and `/ws` to `http://localhost:8080`. The `/news-proxy/` path only exists in the production nginx build.
 
 ## Device Mapping
 

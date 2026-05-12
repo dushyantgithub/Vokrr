@@ -116,3 +116,29 @@ async def test_set_level_template(command_catalog: CommandCatalog) -> None:
     assert response.understood is True
     assert response.matched_device_ids == ["gaming_room_tubelight"]
     assert device_service.calls[0][2].brightness == 42
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_action_and_target_match_at_eighty_percent(
+    command_catalog: CommandCatalog,
+) -> None:
+    device_service = FakeDeviceService()
+    intent = IntentService(device_service, command_catalog)
+
+    response = await intent.handle("turn of gaming room tube lite")
+
+    assert response.understood is True
+    assert response.matched_device_ids == ["gaming_room_tubelight"]
+    assert device_service.calls[0][0:2] == ("set", "gaming_room_tubelight")
+    assert device_service.calls[0][2].state is False
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_room_match_targets_room_devices(command_catalog: CommandCatalog) -> None:
+    device_service = FakeDeviceService()
+    intent = IntentService(device_service, command_catalog)
+
+    response = await intent.handle("turn off bed room")
+
+    assert response.understood is True
+    assert response.matched_device_ids == ["bedroom_socket"]

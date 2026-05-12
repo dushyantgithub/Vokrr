@@ -1,7 +1,9 @@
 import logging
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
+from typing import TypeVar
 
 import yaml
 
@@ -9,6 +11,8 @@ from app.domain.models import Capability, Device, DeviceSetRequest, VoiceCommand
 from app.services.device_service import DeviceService, UnsupportedCapabilityError
 
 logger = logging.getLogger(__name__)
+FUZZY_MATCH_THRESHOLD = 0.80
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -161,6 +165,13 @@ class IntentService:
             for room in rooms
             if _literal_match(target, normalize_text(room.name)) or room.id == slugify(target)
         ]
+        if not room_matches:
+            fuzzy_room = _best_fuzzy_match(
+                target,
+                [(room, [room.name, room.id.replace("_", " ")]) for room in rooms],
+            )
+            if fuzzy_room is not None:
+                room_matches = [fuzzy_room]
         if room_matches:
             room_ids = {room.id for room in room_matches}
             return [
@@ -192,7 +203,25 @@ class IntentService:
             in _space_fold(normalize_text(f"{device.room_name} {device.name}"))
             or target_folded in _space_fold(normalize_text(device.id.replace("_", " ")))
         ]
-        return contains_matches if len(contains_matches) == 1 else []
+        if len(contains_matches) == 1:
+            return contains_matches
+
+        fuzzy_device = _best_fuzzy_match(
+            target,
+            [
+                (
+                    device,
+                    [
+                        device.name,
+                        f"{device.room_name} {device.name}",
+                        device.id.replace("_", " "),
+                        device.entity_id.replace(".", " ").replace("_", " "),
+                    ],
+                )
+                for device in devices
+            ],
+        )
+        return [fuzzy_device] if fuzzy_device is not None else []
 
     @staticmethod
     def _fallback_match(normalized: str) -> CommandMatch | None:
@@ -205,13 +234,18 @@ class IntentService:
         for phrase, action in [
             ("turn on ", "turn_on"),
             ("switch on ", "turn_on"),
+            ("power on ", "turn_on"),
+            ("start ", "turn_on"),
             ("turn off ", "turn_off"),
             ("switch off ", "turn_off"),
+            ("power off ", "turn_off"),
+            ("stop ", "turn_off"),
             ("toggle ", "toggle"),
+            ("change ", "toggle"),
         ]:
             if normalized.startswith(phrase):
                 return CommandMatch(action=action, target=normalized.removeprefix(phrase).strip())
-        return None
+        return fuzzy_action_match(normalized)
 
 
 def compile_template(template: str) -> re.Pattern[str]:
@@ -251,6 +285,94 @@ def _literal_match(target_normalized: str, candidate_normalized: str) -> bool:
     if target_normalized == candidate_normalized:
         return True
     return _space_fold(target_normalized) == _space_fold(candidate_normalized)
+
+
+def fuzzy_action_match(normalized: str) -> CommandMatch | None:
+    words = normalized.split()
+    if not words:
+        return None
+
+    prefix_actions = [
+        ("turn on", "turn_on"),
+        ("switch on", "turn_on"),
+        ("power on", "turn_on"),
+        ("start", "turn_on"),
+        ("turn off", "turn_off"),
+        ("switch off", "turn_off"),
+        ("power off", "turn_off"),
+        ("stop", "turn_off"),
+        ("shut down", "turn_off"),
+        ("toggle", "toggle"),
+        ("change", "toggle"),
+    ]
+    for phrase, action in prefix_actions:
+        phrase_len = len(phrase.split())
+        prefix = " ".join(words[:phrase_len])
+        if _similarity(prefix, phrase) >= FUZZY_MATCH_THRESHOLD and len(words) > phrase_len:
+            return CommandMatch(action=action, target=" ".join(words[phrase_len:]).strip())
+
+    if len(words) >= 3 and _similarity(words[0], "switch") >= FUZZY_MATCH_THRESHOLD:
+        suffix = words[-1]
+        if _similarity(suffix, "on") >= FUZZY_MATCH_THRESHOLD:
+            return CommandMatch(action="turn_on", target=" ".join(words[1:-1]).strip())
+        if _similarity(suffix, "off") >= FUZZY_MATCH_THRESHOLD:
+            return CommandMatch(action="turn_off", target=" ".join(words[1:-1]).strip())
+
+    if len(words) >= 2:
+        suffix = words[-1]
+        if _similarity(suffix, "on") >= FUZZY_MATCH_THRESHOLD:
+            target = " ".join(words[:-1])
+            target = target.removeprefix("turn ").removeprefix("switch ").strip()
+            return CommandMatch(action="turn_on", target=target)
+        if _similarity(suffix, "off") >= FUZZY_MATCH_THRESHOLD:
+            target = " ".join(words[:-1])
+            target = target.removeprefix("turn ").removeprefix("switch ").strip()
+            return CommandMatch(action="turn_off", target=target)
+
+    return None
+
+
+def _best_fuzzy_match(target: str, candidates: list[tuple[T, list[str]]]) -> T | None:
+    scored: list[tuple[float, T]] = []
+    for item, aliases in candidates:
+        score = max(_similarity(target, alias) for alias in aliases if alias)
+        scored.append((score, item))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda entry: entry[0], reverse=True)
+    best_score, best_item = scored[0]
+    second_score = scored[1][0] if len(scored) > 1 else 0.0
+    if best_score < FUZZY_MATCH_THRESHOLD:
+        return None
+    if second_score >= FUZZY_MATCH_THRESHOLD and best_score - second_score < 0.05:
+        logger.info(
+            "voice.intent: fuzzy target ambiguous target=%r best=%.2f second=%.2f",
+            target,
+            best_score,
+            second_score,
+        )
+        return None
+    logger.info("voice.intent: fuzzy target matched target=%r score=%.2f", target, best_score)
+    return best_item
+
+
+def _similarity(left: str, right: str) -> float:
+    left_normalized = normalize_text(left)
+    right_normalized = normalize_text(right)
+    if not left_normalized or not right_normalized:
+        return 0.0
+
+    scores = [
+        SequenceMatcher(None, left_normalized, right_normalized).ratio(),
+        SequenceMatcher(None, _space_fold(left_normalized), _space_fold(right_normalized)).ratio(),
+        SequenceMatcher(None, _token_sort(left_normalized), _token_sort(right_normalized)).ratio(),
+    ]
+    return max(scores)
+
+
+def _token_sort(value: str) -> str:
+    return " ".join(sorted(value.split()))
 
 
 def slugify(value: str) -> str:

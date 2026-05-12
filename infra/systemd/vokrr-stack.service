@@ -6,11 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=quantum-hive
-WorkingDirectory=/home/quantum-hive/Projects/vokrr
+User=dushyant
+WorkingDirectory=/home/dushyant/apps/Vokrr
 RemainAfterExit=yes
-ExecStart=/usr/bin/docker compose -f /home/quantum-hive/Projects/vokrr/infra/docker-compose.yml up -d --build
-ExecStop=/usr/bin/docker compose -f /home/quantum-hive/Projects/vokrr/infra/docker-compose.yml down
+ExecStart=/usr/bin/docker compose -f /home/dushyant/apps/Vokrr/infra/docker-compose.yml --profile cloudflare up -d --build --remove-orphans
+ExecStop=/usr/bin/docker compose -f /home/dushyant/apps/Vokrr/infra/docker-compose.yml --profile cloudflare down
 
 [Install]
 WantedBy=multi-user.target

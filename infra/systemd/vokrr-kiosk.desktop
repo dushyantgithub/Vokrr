@@ -1,8 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Vokrr Kiosk
-Comment=Launch Vokrr as a fullscreen local app
-Exec=/home/quantum-hive/Projects/vokrr/scripts/start_kiosk.sh
+Comment=Launch Vokrr as a fullscreen native Qt app
+Exec=/home/dushyant/apps/Vokrr/scripts/start_qt_kiosk.sh
 Terminal=false
 X-GNOME-Autostart-enabled=true
-

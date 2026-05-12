@@ -148,6 +148,13 @@ class DeviceRegistry:
         device.state = normalize_state(state, attributes)
         return device
 
+    def mark_missing_entities_unavailable(self, seen_entity_ids: set[str]) -> None:
+        for entity_id, device_id in self.entity_to_device_id.items():
+            if entity_id in seen_entity_ids:
+                continue
+            device = self.devices[device_id]
+            device.state = normalize_state("unavailable", {})
+
 
 def normalize_state(state: str, attributes: dict[str, Any]) -> DeviceState:
     brightness = attributes.get("brightness")

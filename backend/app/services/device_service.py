@@ -17,12 +17,30 @@ class DeviceService:
         self.ha_client = ha_client
 
     async def sync_states(self) -> None:
+        seen_entity_ids: set[str] = set()
         for entity in await self.ha_client.states():
+            seen_entity_ids.add(entity["entity_id"])
             self.registry.update_from_ha_state(
                 entity_id=entity["entity_id"],
                 state=entity["state"],
                 attributes=entity.get("attributes", {}),
             )
+        self.registry.mark_missing_entities_unavailable(seen_entity_ids)
+
+    async def _sync_device_state(self, device: Device) -> Device:
+        for entity in await self.ha_client.states():
+            if entity["entity_id"] == device.entity_id:
+                updated = self.registry.update_from_ha_state(
+                    entity_id=entity["entity_id"],
+                    state=entity["state"],
+                    attributes=entity.get("attributes", {}),
+                )
+                return updated or device
+
+        await self.sync_states()
+        raise UnsupportedCapabilityError(
+            f"{device.entity_id} is missing or unavailable in Home Assistant"
+        )
 
     def rooms(self) -> list[Room]:
         return self.registry.all_rooms()
@@ -47,12 +65,13 @@ class DeviceService:
         if Capability.toggle not in device.capabilities:
             raise UnsupportedCapabilityError(f"{device.id} does not support toggle")
 
+        if device.state.state in {"unknown", "unavailable"}:
+            device = await self._sync_device_state(device)
+
         domain = device.entity_id.split(".", 1)[0]
         service = "turn_off" if device.state.is_on else "turn_on"
         await self.ha_client.call_service(domain, service, {"entity_id": device.entity_id})
-        device.state.is_on = not device.state.is_on
-        device.state.state = "on" if device.state.is_on else "off"
-        return device
+        return await self._sync_device_state(device)
 
     async def set_room(self, room_id: str, request: RoomSetRequest) -> Room:
         room = self.room(room_id)
@@ -78,8 +97,7 @@ class DeviceService:
                 "turn_on" if request.state else "turn_off",
                 {"entity_id": device.entity_id},
             )
-            device.state.is_on = request.state
-            device.state.state = "on" if request.state else "off"
+            device = await self._sync_device_state(device)
 
         if request.brightness is not None:
             if Capability.brightness not in device.capabilities:
@@ -90,9 +108,7 @@ class DeviceService:
                 "turn_on",
                 {"entity_id": device.entity_id, "brightness": brightness},
             )
-            device.state.is_on = True
-            device.state.state = "on"
-            device.state.brightness = request.brightness
+            device = await self._sync_device_state(device)
 
         if request.color_temp_kelvin is not None:
             if Capability.color_temperature not in device.capabilities:
@@ -107,9 +123,7 @@ class DeviceService:
                     "color_temp_kelvin": request.color_temp_kelvin,
                 },
             )
-            device.state.is_on = True
-            device.state.state = "on"
-            device.state.color_temp_kelvin = request.color_temp_kelvin
+            device = await self._sync_device_state(device)
 
         if request.rgb_color is not None:
             if Capability.color not in device.capabilities:
@@ -123,9 +137,7 @@ class DeviceService:
                 "turn_on",
                 {"entity_id": device.entity_id, "rgb_color": request.rgb_color},
             )
-            device.state.is_on = True
-            device.state.state = "on"
-            device.state.rgb_color = request.rgb_color
+            device = await self._sync_device_state(device)
 
         if request.percentage is not None:
             if Capability.percentage not in device.capabilities:
@@ -135,6 +147,6 @@ class DeviceService:
                 "set_percentage",
                 {"entity_id": device.entity_id, "percentage": request.percentage},
             )
-            device.state.percentage = request.percentage
+            device = await self._sync_device_state(device)
 
         return device

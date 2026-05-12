@@ -47,7 +47,12 @@ def build_app_state() -> AppState:
     onboarding_service = OnboardingService(onboarding_repository, registry, ha_client)
     command_catalog = CommandCatalog(settings.command_config_path)
     intent_service = IntentService(device_service, command_catalog)
-    state_sync = StateSyncService(ha_client, registry, websocket_manager)
+    state_sync = StateSyncService(
+        ha_client,
+        registry,
+        websocket_manager,
+        interval_seconds=settings.state_sync_interval_seconds,
+    )
     return AppState(
         settings=settings,
         auth_service=auth_service,

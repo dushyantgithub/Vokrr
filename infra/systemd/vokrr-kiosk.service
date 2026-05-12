@@ -1,15 +1,19 @@
 [Unit]
-Description=Vokrr touchscreen kiosk
+Description=Vokrr native Qt touchscreen kiosk
 After=graphical.target lightdm.service network-online.target docker.service vokrr-stack.service
 Wants=graphical.target network-online.target vokrr-stack.service
 
 [Service]
-User=quantum-hive
+User=dushyant
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=DISPLAY=:0
-Environment=VOKRR_KIOSK_URL=http://localhost:3000
-ExecStart=/home/quantum-hive/Projects/vokrr/scripts/start_kiosk.sh
+Environment=XAUTHORITY=/home/dushyant/.Xauthority
+Environment=VOKRR_API_BASE=http://localhost:8080
+Environment=QT_QPA_PLATFORM=xcb
+Environment=QT_XCB_NO_XI2=0
+ExecStartPre=/bin/sleep 8
+ExecStart=/home/dushyant/apps/Vokrr/scripts/start_qt_kiosk.sh
 Restart=always
 RestartSec=5
 
