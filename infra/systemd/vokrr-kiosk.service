@@ -1,7 +1,7 @@
 [Unit]
 Description=Vokrr native Qt touchscreen kiosk
-After=graphical.target lightdm.service network-online.target docker.service vokrr-stack.service
-Wants=graphical.target network-online.target vokrr-stack.service
+After=graphical.target lightdm.service vokrr-wifi.service network-online.target docker.service vokrr-stack.service
+Wants=graphical.target vokrr-wifi.service network-online.target vokrr-stack.service
 
 [Service]
 User=dushyant

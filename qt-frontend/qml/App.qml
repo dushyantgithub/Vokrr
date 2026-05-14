@@ -221,14 +221,30 @@ ApplicationWindow {
         rooms = nextRooms
     }
 
+    function optimisticToggleDevice(device) {
+        if (!device || !device.state)
+            return null
+
+        var updated = JSON.parse(JSON.stringify(device))
+        updated.state.is_on = !device.state.is_on
+        updated.state.state = updated.state.is_on ? "on" : "off"
+        mergeDevice(updated)
+        return updated
+    }
+
     function toggleDevice(device) {
         if (!device)
             return
+        console.log("Toggling device", device.id, device.name)
+        var optimistic = optimisticToggleDevice(device)
         http("POST", "/api/devices/" + encodeURIComponent(device.id) + "/toggle", null, function(status, data) {
             if (status >= 200 && status < 300 && data) {
                 mergeDevice(data)
                 pushNotification(device.name + " updated", "info")
             } else {
+                if (optimistic)
+                    mergeDevice(device)
+                loadSnapshot()
                 pushNotification("Device action failed", "error")
             }
         })
@@ -311,29 +327,44 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
+    GradientBackground {
         anchors.fill: parent
-        gradient: Gradient {
-            GradientStop { position: 0; color: "#071014" }
-            GradientStop { position: 0.48; color: "#0d2524" }
-            GradientStop { position: 1; color: "#15151f" }
-        }
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        opacity: 0.5
-        gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop { position: 0; color: "#1f6f5b" }
-            GradientStop { position: 0.45; color: "transparent" }
-            GradientStop { position: 1; color: "#673f82" }
-        }
     }
 
     Loader {
         anchors.fill: parent
+        active: false
         sourceComponent: token ? shellComponent : loginComponent
+    }
+
+    Loader {
+        id: devicesRadarLoader
+
+        property var scannerDevices: allDevices()
+
+        anchors.fill: parent
+        active: activeView === "Devices"
+        visible: active
+        source: Qt.resolvedUrl("RadarDemoContent.qml")
+        z: 5
+
+        onLoaded: {
+            item.setDevices(scannerDevices)
+            item.deviceClicked.connect(function(device) { toggleDevice(device) })
+        }
+        onScannerDevicesChanged: {
+            if (item)
+                item.setDevices(scannerDevices)
+        }
+    }
+
+    BottomToolbar {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 16
+        width: 188
+        height: 54
+        z: 10
     }
 
     Component {
@@ -699,6 +730,169 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+
+    component BottomToolbar: Item {
+        id: rootItem
+
+        readonly property var toolbarItems: [
+            { key: "Dashboard", icon: "dashboard" },
+            { key: "Devices", icon: "devices" },
+            { key: "Settings", icon: "settings" }
+        ]
+        readonly property int itemCount: toolbarItems.length
+        readonly property real padding: 3
+        readonly property real gap: 2
+        readonly property real itemWidth: (toolbarItemsArea.width - gap * (itemCount - 1)) / itemCount
+
+        function activeIndex() {
+            for (var i = 0; i < toolbarItems.length; i++) {
+                if (toolbarItems[i].key === activeView)
+                    return i
+            }
+            return 0
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 999
+            color: "#2f27272a"
+            border.color: "#18ffffff"
+            border.width: 1
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: rootItem.padding
+            radius: 999
+            color: "#1f71717a"
+        }
+
+        Item {
+            id: contentArea
+
+            objectName: "#mainToolbar"
+            anchors.fill: parent
+            anchors.margins: rootItem.padding
+
+            Rectangle {
+                id: activeIndicator
+
+                width: rootItem.itemWidth
+                height: parent.height
+                x: (rootItem.itemWidth + rootItem.gap) * rootItem.activeIndex()
+                radius: 999
+                color: "#1f09090b"
+                border.color: "#16ffffff"
+                border.width: 1
+
+                Behavior on x {
+                    NumberAnimation {
+                        duration: 200
+                        easing.type: Easing.InOutQuad
+                    }
+                }
+            }
+
+            Row {
+                id: toolbarItemsArea
+
+                anchors.fill: parent
+                spacing: rootItem.gap
+                clip: true
+
+                Repeater {
+                    model: rootItem.toolbarItems
+
+                    ToolbarTab {
+                        width: rootItem.itemWidth
+                        height: toolbarItemsArea.height
+                        iconName: modelData.icon
+                        selected: activeView === modelData.key
+                        onClicked: activeView = modelData.key
+                    }
+                }
+            }
+        }
+    }
+
+    component ToolbarTab: Item {
+        id: toolbarTab
+
+        property string iconName: ""
+        property bool selected: false
+        signal clicked()
+
+        function iconPath() {
+            return "qrc:/assets/icons/tab-" + iconName + (selected ? "-active" : "") + ".svg"
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: parent.width
+            height: parent.height
+            radius: 999
+            color: pressArea.pressed ? "#14ffffff" : "transparent"
+        }
+
+        Image {
+            anchors.centerIn: parent
+            width: 24
+            height: 24
+            source: toolbarTab.iconPath()
+            fillMode: Image.PreserveAspectFit
+            mipmap: true
+            smooth: true
+        }
+
+        MouseArea {
+            id: pressArea
+            anchors.fill: parent
+            onClicked: toolbarTab.clicked()
+        }
+    }
+
+    component GradientBackground: Item {
+        Rectangle {
+            anchors.fill: parent
+            color: "#071014"
+        }
+
+        Canvas {
+            anchors.fill: parent
+            antialiasing: true
+
+            onPaint: {
+                var ctx = getContext("2d")
+                var w = width
+                var h = height
+                if (w <= 0 || h <= 0)
+                    return
+
+                var cx = w * 0.5
+                var cy = h * -0.5
+                var rx = w * 1.25
+                var ry = h * 1.25
+                var scaleY = ry / rx
+
+                ctx.clearRect(0, 0, w, h)
+                ctx.save()
+                ctx.translate(cx, cy)
+                ctx.scale(1, scaleY)
+
+                var gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, rx)
+                gradient.addColorStop(0, "rgba(99, 102, 241, 0.21)")
+                gradient.addColorStop(0.4, "rgba(99, 102, 241, 0.21)")
+                gradient.addColorStop(1, "rgba(99, 102, 241, 0)")
+
+                ctx.fillStyle = gradient
+                ctx.fillRect(-cx, -cy / scaleY, w, h / scaleY)
+                ctx.restore()
+            }
+
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
         }
     }
 }

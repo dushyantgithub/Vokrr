@@ -110,5 +110,11 @@ configure_official_touch_display
 run_step "Installing Docker engine and compose plugin"
 install_docker
 
+run_step "Installing Vokrr Wi-Fi boot configuration service"
+chmod 0755 /home/dushyant/apps/Vokrr/scripts/configure_wifi_networks.sh
+install -m 0644 /home/dushyant/apps/Vokrr/infra/systemd/vokrr-wifi.service /etc/systemd/system/vokrr-wifi.service
+systemctl daemon-reload
+systemctl enable vokrr-wifi.service
+
 run_step "All Phase 0 automated steps complete"
 echo "Reboot now to apply firmware/display changes. The official DSI touch display should not need manual calibration."

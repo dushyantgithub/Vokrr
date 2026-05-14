@@ -1,0 +1,13 @@
+[Unit]
+Description=Configure Vokrr Wi-Fi networks
+After=NetworkManager.service
+Wants=NetworkManager.service
+Before=network-online.target vokrr-stack.service vokrr-kiosk.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/dushyant/apps/Vokrr/scripts/configure_wifi_networks.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -18,6 +18,29 @@ qt_add_qml_module(vokrr-qt
     VERSION 1.0
     QML_FILES
         qml/App.qml
+        qml/Main.qml
+        qml/RadarDemoContent.qml
+        qml/components/Radar.qml
+        qml/components/IconContainer.qml
+        qml/components/BulbOn.qml
+        qml/components/BulbOff.qml
+        qml/components/SocketOn.qml
+        qml/components/SocketOff.qml
+)
+
+qt_add_resources(vokrr-qt vokrr_assets
+    PREFIX "/"
+    FILES
+        assets/icons/bulb.svg
+        assets/icons/tab-dashboard.svg
+        assets/icons/tab-dashboard-active.svg
+        assets/icons/tab-devices.svg
+        assets/icons/tab-devices-active.svg
+        assets/icons/tab-settings.svg
+        assets/icons/tab-settings-active.svg
+        assets/images/room-1.jpg
+        assets/images/room-2.jpg
+        assets/images/room-3.jpg
 )
 
 target_link_libraries(vokrr-qt
