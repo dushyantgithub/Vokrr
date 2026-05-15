@@ -29,6 +29,9 @@ qt_add_qml_module(vokrr-qt
         qml/components/CeilingFan.qml
         qml/components/SmartSwitch.qml
         qml/components/SwitchBoard.qml
+        qml/components/Button.qml
+        qml/components/CPU_animation_bg.qml
+        qml/components/app_loader.qml
         qml/components/SocketOn.qml
         qml/components/SocketOff.qml
 )
@@ -43,6 +46,7 @@ qt_add_resources(vokrr-qt vokrr_assets
         assets/icons/tab-devices-active.svg
         assets/icons/tab-settings.svg
         assets/icons/tab-settings-active.svg
+        assets/icons/cpu-architecture-vokrr.svg
         assets/images/room-1.jpg
         assets/images/room-2.jpg
         assets/images/room-3.jpg

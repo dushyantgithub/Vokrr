@@ -40,12 +40,15 @@ class NetworkService:
             ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"]
         )
         connected_ssid = ""
+        ethernet_connection = ""
         wifi_state = "unknown"
         if device_result.returncode == 0:
             for line in device_result.stdout.splitlines():
                 parts = line.split(":")
                 if len(parts) >= 4 and parts[0] == self.settings.wifi_interface:
                     wifi_state = parts[2]
+                if len(parts) >= 4 and parts[1] == "ethernet" and parts[2] == "connected":
+                    ethernet_connection = parts[3]
 
         wifi_result = self._run(
             ["nmcli", "-t", "-f", "ACTIVE,SSID", "device", "wifi", "list", "ifname", self.settings.wifi_interface]
@@ -61,23 +64,37 @@ class NetworkService:
             "available": True,
             "connected": bool(connected_ssid),
             "ssid": connected_ssid,
+            "connection_type": "wifi" if connected_ssid else ("ethernet" if ethernet_connection else ""),
+            "ethernet": ethernet_connection,
             "interface": self.settings.wifi_interface,
             "state": wifi_state,
             "configured": self._configured_networks(),
         }
 
     def connect_wifi(self, network_key: str) -> dict:
-        connection_name = {
-            "primary": "vokrr-primary-wifi",
-            "secondary": "vokrr-secondary-wifi",
-        }.get(network_key)
-        if not connection_name:
+        networks = {
+            "primary": (self.settings.primary_ssid, self.settings.primary_ssid_password),
+            "secondary": (self.settings.secondary_ssid, self.settings.secondary_ssid_password),
+        }
+        ssid, password = networks.get(network_key, ("", ""))
+        if not ssid:
             raise ValueError("Unknown Wi-Fi network")
 
         self._run(["nmcli", "radio", "wifi", "on"])
         self._run(["nmcli", "device", "wifi", "rescan", "ifname", self.settings.wifi_interface])
         result = self._run(
-            ["nmcli", "connection", "up", connection_name, "ifname", self.settings.wifi_interface],
+            [
+                "sudo",
+                "nmcli",
+                "device",
+                "wifi",
+                "connect",
+                ssid,
+                "password",
+                password,
+                "ifname",
+                self.settings.wifi_interface,
+            ],
             timeout=30,
         )
         if result.returncode != 0:

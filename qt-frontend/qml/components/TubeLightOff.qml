@@ -3,8 +3,8 @@ import QtQuick
 Item {
     id: root
 
-    width: 520
-    height: 120
+    width: 560
+    height: 140
 
     property bool isOn: false
     property color glowColor: "#fff4cf"
@@ -12,9 +12,9 @@ Item {
     Rectangle {
         visible: root.isOn
 
-        width: 410
-        height: 54
-        radius: 27
+        width: 470
+        height: 72
+        radius: 36
 
         anchors.centerIn: tube
 
@@ -25,9 +25,9 @@ Item {
     Rectangle {
         visible: root.isOn
 
-        width: 450
-        height: 78
-        radius: 39
+        width: 530
+        height: 100
+        radius: 50
 
         anchors.centerIn: tube
 
@@ -38,9 +38,9 @@ Item {
     Rectangle {
         id: tube
 
-        width: 410
-        height: 46
-        radius: 23
+        width: 460
+        height: 52
+        radius: 26
 
         anchors.centerIn: parent
 
@@ -57,9 +57,9 @@ Item {
     Rectangle {
         visible: root.isOn
 
-        width: 380
-        height: 12
-        radius: 6
+        width: 420
+        height: 16
+        radius: 8
 
         anchors.centerIn: tube
 
@@ -70,9 +70,9 @@ Item {
     Rectangle {
         id: leftCap
 
-        width: 54
-        height: 62
-        radius: 14
+        width: 56
+        height: 66
+        radius: 15
 
         anchors.verticalCenter: tube.verticalCenter
         anchors.right: tube.left
@@ -91,9 +91,9 @@ Item {
     Rectangle {
         id: rightCap
 
-        width: 54
-        height: 62
-        radius: 14
+        width: 56
+        height: 66
+        radius: 15
 
         anchors.verticalCenter: tube.verticalCenter
         anchors.left: tube.right
@@ -155,7 +155,7 @@ Item {
 
     Rectangle {
         width: 2
-        height: 56
+        height: 58
         radius: 1
         color: "#c2c2c2"
         anchors.right: leftCap.right
@@ -165,7 +165,7 @@ Item {
 
     Rectangle {
         width: 2
-        height: 56
+        height: 58
         radius: 1
         color: "#c2c2c2"
         anchors.left: rightCap.left

@@ -1,7 +1,9 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 import QtWebSockets
+import "components" as VokrrComponents
 
 ApplicationWindow {
     id: app
@@ -31,6 +33,11 @@ ApplicationWindow {
     property bool devicesRefreshing: false
     property var networkStatus: null
     property string networkError: ""
+    property bool startupLoaderVisible: true
+    property string settingsPanel: ""
+    property var systemInfo: ({})
+    property string toastMessage: ""
+    property bool toastVisible: false
 
     readonly property var navItems: [
         { key: "Dashboard", label: "Dashboard", icon: "H" },
@@ -246,6 +253,23 @@ ApplicationWindow {
         })
     }
 
+    function loadSystemInfo() {
+        if (!token)
+            return
+        http("GET", "/api/system/info", null, function(status, data) {
+            if (status >= 200 && status < 300 && data)
+                systemInfo = data
+            else
+                showToast("Could not load system info")
+        })
+    }
+
+    function showToast(message) {
+        toastMessage = message
+        toastVisible = true
+        toastTimer.restart()
+    }
+
     function connectWifi(networkKey) {
         if (!networkKey)
             return
@@ -256,9 +280,29 @@ ApplicationWindow {
                 networkError = ""
                 loadHealth()
                 loadSnapshot()
+                showToast("Connected")
             } else {
                 networkError = "Could not connect to Wi-Fi"
                 loadNetworkStatus()
+                showToast("Connection failed")
+            }
+        })
+    }
+
+    function openSettingsPanel(panelName) {
+        settingsPanel = panelName
+        if (panelName === "Network")
+            loadNetworkStatus()
+        if (panelName === "Information")
+            loadSystemInfo()
+    }
+
+    function restartRaspberryPi() {
+        http("POST", "/api/admin/system/restart", null, function(status, data) {
+            if (status >= 200 && status < 300) {
+                pushNotification("Raspberry Pi restart requested", "info")
+            } else {
+                pushNotification("Could not restart Raspberry Pi", "error")
             }
         })
     }
@@ -354,6 +398,20 @@ ApplicationWindow {
         onTriggered: kioskLogin()
     }
 
+    Timer {
+        running: true
+        repeat: false
+        interval: 5000
+        onTriggered: startupLoaderVisible = false
+    }
+
+    Timer {
+        id: toastTimer
+        interval: 2600
+        repeat: false
+        onTriggered: toastVisible = false
+    }
+
     WebSocket {
         id: ws
         active: false
@@ -384,31 +442,60 @@ ApplicationWindow {
 
     GradientBackground {
         anchors.fill: parent
+        opacity: startupLoaderVisible ? 0 : 1
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
     }
 
     Loader {
         anchors.fill: parent
         active: false
         sourceComponent: token ? shellComponent : loginComponent
+        opacity: startupLoaderVisible ? 0 : 1
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
     }
 
     Loader {
         id: devicesRadarLoader
 
         property var scannerDevices: allDevices()
+        property var scannerRooms: rooms
         property bool scannerRefreshing: devicesRefreshing
 
         anchors.fill: parent
         active: activeView === "Devices"
         visible: active
         source: Qt.resolvedUrl("RadarDemoContent.qml")
+        opacity: startupLoaderVisible ? 0 : 1
         z: 5
 
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+
         onLoaded: {
-            item.setDevices(scannerDevices)
+            item.setRooms(scannerRooms)
             item.refreshing = scannerRefreshing
             item.deviceClicked.connect(function(device) { toggleDevice(device) })
             item.refreshRequested.connect(function() { refreshDevicesFromHomeAssistant() })
+        }
+        onScannerRoomsChanged: {
+            if (item)
+                item.setRooms(scannerRooms)
         }
         onScannerDevicesChanged: {
             if (item)
@@ -422,12 +509,18 @@ ApplicationWindow {
 
     Loader {
         anchors.fill: parent
-        anchors.margins: 18
-        anchors.bottomMargin: 88
         active: activeView === "Settings"
         visible: active
         sourceComponent: settingsView
+        opacity: startupLoaderVisible ? 0 : 1
         z: 5
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
     }
 
     BottomToolbar {
@@ -436,7 +529,75 @@ ApplicationWindow {
         anchors.bottomMargin: 16
         width: 188
         height: 54
+        opacity: startupLoaderVisible ? 0 : 1
         z: 10
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "#000000"
+        opacity: startupLoaderVisible ? 1 : 0
+        visible: opacity > 0
+        z: 100
+
+        Loader {
+            anchors.centerIn: parent
+            source: Qt.resolvedUrl("components/app_loader.qml")
+
+            onLoaded: {
+                item.size = 200
+                item.loaderColor = "#4FA593"
+                item.trackColor = "#71717a"
+                item.duration = 2000
+                item.running = Qt.binding(function() { return startupLoaderVisible })
+            }
+        }
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: toastVisible ? 18 : -height - 12
+        width: Math.min(parent.width - 40, Math.max(220, toastText.implicitWidth + 40))
+        height: 42
+        radius: 8
+        color: "#f1fffc"
+        border.color: "#4FA593"
+        opacity: toastVisible ? 1 : 0
+        z: 120
+
+        Text {
+            id: toastText
+            anchors.centerIn: parent
+            text: toastMessage
+            color: "#0f1716"
+            font.pixelSize: 13
+            font.bold: true
+            elide: Text.ElideRight
+            width: parent.width - 28
+            horizontalAlignment: Text.AlignHCenter
+        }
+
+        Behavior on y {
+            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 180; easing.type: Easing.OutQuad }
+        }
     }
 
     Component {
@@ -687,70 +848,245 @@ ApplicationWindow {
     Component {
         id: settingsView
         Rectangle {
-            radius: 8
-            color: "#bb102025"
-            border.color: "#315c65"
-            ColumnLayout {
+            color: "#000000"
+
+            Loader {
                 anchors.fill: parent
+                sourceComponent: settingsPanel === "" ? settingsHomeView : settingsPlaceholderView
+            }
+        }
+    }
+
+    Component {
+        id: settingsHomeView
+        Loader {
+            anchors.fill: parent
+            source: Qt.resolvedUrl("components/CPU_animation_bg.qml")
+
+            onLoaded: {
+                item.centerText = "VOKRR"
+                item.animateText = true
+                item.animateLines = true
+                item.animateMarkers = true
+                item.showCpuConnections = true
+                item.navigationRequested.connect(function(panelName) { openSettingsPanel(panelName) })
+                item.restartRequested.connect(function() { restartRaspberryPi() })
+            }
+        }
+    }
+
+    Component {
+        id: settingsPlaceholderView
+        Rectangle {
+            color: "#000000"
+
+            VokrrComponents.Button {
+                anchors.left: parent.left
+                anchors.top: parent.top
                 anchors.margins: 18
-                spacing: 12
-                Text { text: "Settings"; color: "white"; font.pixelSize: 28; font.bold: true }
-                Text { text: "Backend: " + apiBase; color: "#b8cbc8"; font.pixelSize: 16 }
-                Text { text: "User: " + (currentUser ? currentUser.username : "Kiosk"); color: "#b8cbc8"; font.pixelSize: 16 }
+                variant: "ghost"
+                onClicked: settingsPanel = ""
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 150
-                    radius: 8
-                    color: "#99090b12"
-                    border.color: "#334155"
+                contentItem: Component {
+                    Shape {
+                        width: 24
+                        height: 24
+                        antialiasing: true
 
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 14
-                        spacing: 8
+                        ShapePath {
+                            fillColor: "transparent"
+                            strokeColor: "#d7fffb"
+                            strokeWidth: 2.6
+                            capStyle: ShapePath.RoundCap
+                            joinStyle: ShapePath.RoundJoin
 
-                        Text { text: "Internet"; color: "white"; font.pixelSize: 18; font.bold: true }
-                        Text {
-                            Layout.fillWidth: true
-                            text: networkStatus && networkStatus.connected
-                                  ? "Connected to " + networkStatus.ssid
-                                  : "Not connected to Wi-Fi"
-                            color: networkStatus && networkStatus.connected ? "#65e0b5" : "#ffd37a"
-                            font.pixelSize: 15
-                            elide: Text.ElideRight
+                            PathSvg {
+                                path: "M15 5 L8 12 L15 19 M9 12 L20 12"
+                            }
                         }
+                    }
+                }
+            }
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
+            ColumnLayout {
+                width: Math.min(parent.width - 120, 520)
+                anchors.top: parent.top
+                anchors.topMargin: 76
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 18
 
-                            Repeater {
-                                model: networkStatus && networkStatus.configured ? networkStatus.configured : []
+                Text {
+                    Layout.fillWidth: true
+                    text: settingsPanel
+                    color: "#ffffff"
+                    font.pixelSize: 28
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                }
 
-                                Button {
-                                    Layout.preferredWidth: 180
-                                    text: modelData.ssid
-                                    enabled: !(networkStatus && networkStatus.connected && networkStatus.ssid === modelData.ssid)
-                                    onClicked: connectWifi(modelData.key)
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+                    visible: settingsPanel === "Network"
+
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: 10
+
+                        Canvas {
+                            Layout.preferredWidth: 24
+                            Layout.preferredHeight: 24
+
+                            onPaint: {
+                                var ctx = getContext("2d")
+                                ctx.clearRect(0, 0, width, height)
+                                ctx.strokeStyle = "#4FA593"
+                                ctx.lineWidth = 2
+                                ctx.lineCap = "round"
+                                ctx.lineJoin = "round"
+
+                                if (networkStatus && networkStatus.connection_type === "ethernet") {
+                                    ctx.strokeRect(6, 7, 12, 10)
+                                    ctx.beginPath()
+                                    ctx.moveTo(9, 17); ctx.lineTo(9, 20)
+                                    ctx.moveTo(15, 17); ctx.lineTo(15, 20)
+                                    ctx.moveTo(9, 4); ctx.lineTo(15, 4); ctx.lineTo(15, 7)
+                                    ctx.stroke()
+                                } else {
+                                    ctx.beginPath()
+                                    ctx.arc(12, 18, 1.5, 0, Math.PI * 2)
+                                    ctx.stroke()
+                                    ctx.beginPath()
+                                    ctx.arc(12, 18, 6, Math.PI * 1.18, Math.PI * 1.82)
+                                    ctx.stroke()
+                                    ctx.beginPath()
+                                    ctx.arc(12, 18, 11, Math.PI * 1.12, Math.PI * 1.88)
+                                    ctx.stroke()
                                 }
                             }
                         }
 
                         Text {
-                            Layout.fillWidth: true
-                            text: networkError
-                            visible: networkError !== ""
-                            color: networkError === "Connecting..." ? "#b8cbc8" : "#ffaaa5"
-                            font.pixelSize: 12
+                            text: networkStatus && networkStatus.connection_type === "ethernet"
+                                  ? (networkStatus.ethernet || "RJ45")
+                                  : (networkStatus && networkStatus.ssid ? networkStatus.ssid : "Not connected")
+                            color: "#d7fffb"
+                            font.pixelSize: 16
+                            font.bold: true
                             elide: Text.ElideRight
+                            Layout.maximumWidth: 360
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Available networks"
+                        color: "#7f918d"
+                        font.pixelSize: 12
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    Repeater {
+                        model: networkStatus && networkStatus.configured ? networkStatus.configured : []
+
+                        VokrrComponents.Button {
+                            Layout.alignment: Qt.AlignHCenter
+                            width: 320
+                            height: 50
+                            variant: "ghost"
+                            onClicked: connectWifi(modelData.key)
+
+                            contentItem: Component {
+                                Text {
+                                    width: 280
+                                    text: modelData.ssid
+                                    color: "#d7fffb"
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
                         }
                     }
                 }
 
-                Button { text: "Refresh status"; onClicked: { loadSnapshot(); loadHealth(); loadNetworkStatus() } }
-                Button { text: "Sign out"; onClicked: logout() }
-                Item { Layout.fillHeight: true }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    visible: settingsPanel === "Profile"
+
+                    SettingsInfoRow {
+                        label: "Username"
+                        value: currentUser ? currentUser.username : "Kiosk"
+                    }
+                    SettingsInfoRow {
+                        label: "Role"
+                        value: currentUser && currentUser.is_admin ? "Admin" : "Local console"
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: settingsPanel === "Information"
+
+                    Repeater {
+                        model: [
+                            { label: "Project", value: systemInfo.project || "Vokrr" },
+                            { label: "Raspberry Pi", value: systemInfo.raspberry_pi_model || "Unknown" },
+                            { label: "OS", value: systemInfo.os || "Unknown" },
+                            { label: "Kernel", value: systemInfo.kernel || "Unknown" },
+                            { label: "Architecture", value: systemInfo.architecture || "Unknown" },
+                            { label: "Frontend", value: systemInfo.frontend || "Qt Quick/QML" },
+                            { label: "Qt", value: systemInfo.qt || "Unknown" },
+                            { label: "Backend", value: systemInfo.backend || "FastAPI" },
+                            { label: "Python", value: systemInfo.python || "Unknown" }
+                        ]
+
+                        SettingsInfoRow {
+                            label: modelData.label
+                            value: modelData.value
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    component SettingsInfoRow: Rectangle {
+        property string label: ""
+        property string value: ""
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: 42
+        radius: 8
+        color: "#0b1010"
+        border.color: "#18302d"
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 14
+            anchors.rightMargin: 14
+            spacing: 12
+
+            Text {
+                text: label
+                color: "#7f918d"
+                font.pixelSize: 12
+                font.bold: true
+                Layout.preferredWidth: 130
+                elide: Text.ElideRight
+            }
+
+            Text {
+                text: value
+                color: "#d7fffb"
+                font.pixelSize: 13
+                Layout.fillWidth: true
+                elide: Text.ElideRight
             }
         }
     }

@@ -1,3 +1,7 @@
+import platform
+import shutil
+import subprocess
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 
@@ -214,6 +218,49 @@ async def health(state: AppState = Depends(get_app_state)) -> dict:
 @router.get("/api/system/network", dependencies=[Depends(require_user)])
 async def network_status(state: AppState = Depends(get_app_state)) -> dict:
     return state.network_service.wifi_status()
+
+
+@router.get("/api/system/info", dependencies=[Depends(require_user)])
+async def system_info() -> dict:
+    def command(args: list[str]) -> str:
+        try:
+            result = subprocess.run(args, check=False, capture_output=True, text=True, timeout=4)
+        except Exception:
+            return ""
+        return result.stdout.strip()
+
+    model = ""
+    try:
+        with open("/proc/device-tree/model", "r", encoding="utf-8") as model_file:
+            model = model_file.read().replace("\x00", "").strip()
+    except OSError:
+        model = ""
+
+    os_name = ""
+    try:
+        with open("/etc/os-release", "r", encoding="utf-8") as os_file:
+            for line in os_file:
+                if line.startswith("PRETTY_NAME="):
+                    os_name = line.partition("=")[2].strip().strip('"')
+                    break
+    except OSError:
+        os_name = ""
+
+    qt_version = command(["qmake6", "-query", "QT_VERSION"]) if shutil.which("qmake6") else ""
+    if not qt_version and shutil.which("qmake"):
+        qt_version = command(["qmake", "-query", "QT_VERSION"])
+
+    return {
+        "project": "Vokrr native Qt touchscreen kiosk",
+        "backend": "FastAPI 0.1.0",
+        "frontend": "Qt Quick/QML",
+        "raspberry_pi_model": model or "Unknown",
+        "os": os_name or platform.platform(),
+        "kernel": platform.release(),
+        "architecture": platform.machine(),
+        "python": platform.python_version(),
+        "qt": qt_version or "Unknown",
+    }
 
 
 @router.post("/api/system/network/{network_key}/connect", dependencies=[Depends(require_user)])
