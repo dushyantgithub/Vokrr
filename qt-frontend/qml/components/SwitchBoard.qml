@@ -22,6 +22,13 @@ Item {
         return !!(device && device.state && device.state.is_on)
     }
 
+    function isSocketDevice(device) {
+        if (!device || device.type !== "switch")
+            return false
+        var text = ((device.name || "") + " " + (device.entity_id || "")).toLowerCase()
+        return text.indexOf("socket") !== -1
+    }
+
     width: Math.max(132, switchRow.width + 20)
     height: 122
     opacity: 0
@@ -57,14 +64,24 @@ Item {
                 model: root.devices
 
                 Item {
-                    width: 44
+                    width: root.isSocketDevice(modelData) ? 56 : 44
                     height: 82
 
                     SmartSwitch {
+                        visible: !root.isSocketDevice(modelData)
                         anchors.centerIn: parent
                         scale: 0.25
                         isOn: root.deviceIsOn(modelData)
                         accentColor: "#44ff88"
+                    }
+
+                    Loader {
+                        visible: root.isSocketDevice(modelData)
+                        anchors.centerIn: parent
+                        width: 260
+                        height: 380
+                        scale: 0.13
+                        source: root.deviceIsOn(modelData) ? "SocketOn.qml" : "SocketOff.qml"
                     }
 
                     TapHandler {

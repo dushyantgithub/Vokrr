@@ -7,6 +7,7 @@ Item {
 
     property var devices: []
     property var deviceStates: ({})
+    property var devicePayloads: ({})
     property bool refreshing: false
     signal deviceClicked(var device)
     signal refreshRequested()
@@ -59,10 +60,12 @@ Item {
                     is_switchboard: true,
                     ha_device_id: device.ha_device_id,
                     room_name: device.room_name,
+                    device_keys: [],
                     devices: []
                 }
                 order.push(groupKey)
             }
+            groups[groupKey].device_keys.push(deviceKey(device))
             groups[groupKey].devices.push(device)
         }
 
@@ -89,12 +92,34 @@ Item {
 
     function setDevices(nextDevices) {
         var unique = uniqueDeviceList(nextDevices || [])
+        var nextPayloads = {}
         for (var i = 0; i < unique.length; i++)
+        {
             updateDevice(unique[i])
+            nextPayloads[deviceKey(unique[i])] = unique[i]
+        }
+        devicePayloads = nextPayloads
 
         var displayDevices = displayDeviceList(unique)
-        if (!sameDeviceList(devices, displayDevices) || JSON.stringify(devices) !== JSON.stringify(displayDevices))
+        if (!sameDeviceList(devices, displayDevices))
             devices = displayDevices
+    }
+
+    function currentDevice(device) {
+        var key = deviceKey(device)
+        if (key && devicePayloads.hasOwnProperty(key))
+            return devicePayloads[key]
+        return device
+    }
+
+    function currentSwitchboardDevices(board) {
+        var keys = board && board.device_keys ? board.device_keys : []
+        var result = []
+        for (var i = 0; i < keys.length; i++) {
+            if (devicePayloads.hasOwnProperty(keys[i]))
+                result.push(devicePayloads[keys[i]])
+        }
+        return result.length ? result : ((board && board.devices) || [])
     }
 
     function updateDevice(device) {
@@ -198,9 +223,9 @@ Item {
 
                 IconContainer {
                     visible: !root.isSwitchboard(modelData)
-                    device: modelData
+                    device: root.currentDevice(modelData)
                     stateOverrideActive: true
-                    stateOverrideOn: root.deviceIsOn(modelData)
+                    stateOverrideOn: root.deviceIsOn(root.currentDevice(modelData))
                     text: root.deviceLabel(modelData)
                     delay: 160 + index * 80
                     iconSource: "qrc:/assets/icons/bulb.svg"
@@ -210,7 +235,7 @@ Item {
 
                 SwitchBoard {
                     visible: root.isSwitchboard(modelData)
-                    devices: modelData.devices || []
+                    devices: root.currentSwitchboardDevices(modelData)
                     deviceStates: root.deviceStates
                     text: root.deviceLabel(modelData)
                     delay: 160 + index * 80

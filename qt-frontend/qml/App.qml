@@ -298,7 +298,6 @@ ApplicationWindow {
             } else {
                 if (optimistic)
                     mergeDevice(device)
-                loadSnapshot()
                 pushNotification("Device action failed", "error")
             }
         })
@@ -323,7 +322,6 @@ ApplicationWindow {
         http("POST", "/api/scenes/" + encodeURIComponent(scene.id) + "/run", null, function(status) {
             if (status >= 200 && status < 300) {
                 pushNotification(scene.name + " ran", "info")
-                loadSnapshot()
             } else {
                 pushNotification("Could not run " + scene.name, "error")
             }
@@ -354,13 +352,6 @@ ApplicationWindow {
         repeat: true
         interval: 5000
         onTriggered: kioskLogin()
-    }
-
-    Timer {
-        running: token.length > 0
-        repeat: true
-        interval: 3000
-        onTriggered: loadSnapshot()
     }
 
     WebSocket {

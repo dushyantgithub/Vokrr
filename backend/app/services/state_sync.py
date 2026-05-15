@@ -56,7 +56,7 @@ class StateSyncService:
     async def _reconcile_loop(self) -> None:
         while True:
             try:
-                await self.reconcile_once()
+                await self.reconcile_once(broadcast=False)
             except Exception:
                 logger.exception("Home Assistant state reconciliation failed")
             await asyncio.sleep(self.interval_seconds)
