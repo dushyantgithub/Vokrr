@@ -7,6 +7,7 @@ from app.services.device_service import DeviceService
 from app.services.home_assistant import HomeAssistantClient
 from app.services.intent import CommandCatalog, IntentService
 from app.services.onboarding import OnboardingRepository, OnboardingService
+from app.services.network import NetworkService
 from app.services.registry import DeviceRegistry
 from app.services.scene_service import SceneService
 from app.services.state_sync import StateSyncService
@@ -26,6 +27,7 @@ class AppState:
     command_catalog: CommandCatalog
     intent_service: IntentService
     state_sync: StateSyncService
+    network_service: NetworkService
 
 
 _state: AppState | None = None
@@ -53,6 +55,7 @@ def build_app_state() -> AppState:
         websocket_manager,
         interval_seconds=settings.state_sync_interval_seconds,
     )
+    network_service = NetworkService(settings)
     return AppState(
         settings=settings,
         auth_service=auth_service,
@@ -65,6 +68,7 @@ def build_app_state() -> AppState:
         command_catalog=command_catalog,
         intent_service=intent_service,
         state_sync=state_sync,
+        network_service=network_service,
     )
 
 

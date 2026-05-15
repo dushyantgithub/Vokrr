@@ -4,6 +4,8 @@ set -euo pipefail
 APP_DIR="${VOKRR_APP_DIR:-/home/dushyant/apps/Vokrr}"
 ENV_FILES=("${APP_DIR}/.env" "${APP_DIR}/scripts/.env")
 WIFI_IFACE="${VOKRR_WIFI_IFACE:-wlan0}"
+SCAN_TIMEOUT_SECONDS="${VOKRR_WIFI_SCAN_TIMEOUT_SECONDS:-60}"
+SCAN_INTERVAL_SECONDS="${VOKRR_WIFI_SCAN_INTERVAL_SECONDS:-5}"
 
 read_env_value() {
   local key="$1"
@@ -37,6 +39,7 @@ configure_connection() {
     nmcli connection modify "${name}" \
       connection.autoconnect yes \
       connection.autoconnect-priority "${priority}" \
+      connection.interface-name "${WIFI_IFACE}" \
       802-11-wireless.ssid "${ssid}" \
       802-11-wireless.mode infrastructure \
       ipv4.method auto \
@@ -45,6 +48,7 @@ configure_connection() {
     nmcli connection add type wifi ifname "*" con-name "${name}" ssid "${ssid}" \
       connection.autoconnect yes \
       connection.autoconnect-priority "${priority}" \
+      connection.interface-name "${WIFI_IFACE}" \
       802-11-wireless.mode infrastructure \
       ipv4.method auto \
       ipv6.method auto >/dev/null
@@ -75,6 +79,23 @@ connect_if_visible() {
   return 1
 }
 
+connect_available_network() {
+  local primary_ssid="$1"
+  local secondary_ssid="$2"
+
+  connect_if_visible "vokrr-primary-wifi" "${primary_ssid}" && {
+    echo "Connected to primary Vokrr Wi-Fi network."
+    return 0
+  }
+
+  connect_if_visible "vokrr-secondary-wifi" "${secondary_ssid}" && {
+    echo "Connected to secondary Vokrr Wi-Fi network."
+    return 0
+  }
+
+  return 1
+}
+
 main() {
   if ! command -v nmcli >/dev/null 2>&1; then
     echo "NetworkManager CLI (nmcli) is required." >&2
@@ -97,21 +118,29 @@ main() {
   configure_connection "vokrr-primary-wifi" "${primary_ssid}" "${primary_password}" 20
   configure_connection "vokrr-secondary-wifi" "${secondary_ssid}" "${secondary_password}" 10
 
-  nmcli device wifi rescan ifname "${WIFI_IFACE}" >/dev/null 2>&1 || true
-  sleep 2
+  local deadline
+  deadline=$(( $(date +%s) + SCAN_TIMEOUT_SECONDS ))
+  while [[ "$(date +%s)" -lt "${deadline}" ]]; do
+    nmcli device set "${WIFI_IFACE}" managed yes >/dev/null 2>&1 || true
+    nmcli device wifi rescan ifname "${WIFI_IFACE}" >/dev/null 2>&1 || true
+    sleep 2
 
-  current_ssid="$(nmcli -t -f ACTIVE,SSID device wifi list ifname "${WIFI_IFACE}" | awk -F: '$1 == "yes" { print $2; exit }')"
-  if [[ "${current_ssid}" == "${primary_ssid}" || "${current_ssid}" == "${secondary_ssid}" ]]; then
-    echo "Wi-Fi already connected to a configured Vokrr network."
-    exit 0
-  fi
+    current_ssid="$(nmcli -t -f ACTIVE,SSID device wifi list ifname "${WIFI_IFACE}" | awk -F: '$1 == "yes" { print $2; exit }')"
+    if [[ "${current_ssid}" == "${primary_ssid}" || "${current_ssid}" == "${secondary_ssid}" ]]; then
+      echo "Wi-Fi already connected to a configured Vokrr network."
+      exit 0
+    fi
 
-  connect_if_visible "vokrr-primary-wifi" "${primary_ssid}" && {
+    connect_available_network "${primary_ssid}" "${secondary_ssid}" && exit 0
+    sleep "${SCAN_INTERVAL_SECONDS}"
+  done
+
+  # Final attempt lets NetworkManager try even if the AP was hidden or missed in scan results.
+  nmcli connection up "vokrr-primary-wifi" ifname "${WIFI_IFACE}" >/dev/null 2>&1 && {
     echo "Connected to primary Vokrr Wi-Fi network."
     exit 0
   }
-
-  connect_if_visible "vokrr-secondary-wifi" "${secondary_ssid}" && {
+  nmcli connection up "vokrr-secondary-wifi" ifname "${WIFI_IFACE}" >/dev/null 2>&1 && {
     echo "Connected to secondary Vokrr Wi-Fi network."
     exit 0
   }

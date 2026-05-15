@@ -113,6 +113,8 @@ install_docker
 run_step "Installing Vokrr Wi-Fi boot configuration service"
 chmod 0755 /home/dushyant/apps/Vokrr/scripts/configure_wifi_networks.sh
 install -m 0644 /home/dushyant/apps/Vokrr/infra/systemd/vokrr-wifi.service /etc/systemd/system/vokrr-wifi.service
+install -m 0644 /home/dushyant/apps/Vokrr/infra/systemd/vokrr-stack.service /etc/systemd/system/vokrr-stack.service
+install -m 0644 /home/dushyant/apps/Vokrr/infra/systemd/vokrr-kiosk.service /etc/systemd/system/vokrr-kiosk.service
 systemctl daemon-reload
 systemctl enable vokrr-wifi.service
 

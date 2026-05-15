@@ -28,6 +28,9 @@ ApplicationWindow {
     property var notifications: []
     property string loginError: ""
     property bool loading: true
+    property bool devicesRefreshing: false
+    property var networkStatus: null
+    property string networkError: ""
 
     readonly property var navItems: [
         { key: "Dashboard", label: "Dashboard", icon: "H" },
@@ -154,6 +157,7 @@ ApplicationWindow {
         loginError = ""
         loadSnapshot()
         loadHealth()
+        loadNetworkStatus()
         ws.active = true
     }
 
@@ -197,16 +201,66 @@ ApplicationWindow {
         })
     }
 
+    function refreshDevicesFromHomeAssistant() {
+        if (!token || devicesRefreshing)
+            return
+        devicesRefreshing = true
+        http("POST", "/api/devices/refresh", null, function(status, data) {
+            if (status >= 200 && status < 300 && data) {
+                rooms = data
+                if (!selectedRoomId && rooms.length)
+                    selectedRoomId = rooms[0].id
+                pushNotification("Devices refreshed", "info")
+            } else {
+                pushNotification("Could not refresh devices", "error")
+            }
+            devicesRefreshing = false
+        })
+    }
+
     function loadHealth() {
         http("GET", "/api/system/health", null, function(status, data) {
             if (status >= 200 && status < 300 && data) {
+                var wasOffline = healthError !== ""
                 health = data
                 healthError = ""
+                if (wasOffline && token)
+                    loadSnapshot()
             } else {
                 health = null
                 healthError = "Backend unavailable"
             }
         }, false)
+    }
+
+    function loadNetworkStatus() {
+        if (!token)
+            return
+        http("GET", "/api/system/network", null, function(status, data) {
+            if (status >= 200 && status < 300 && data) {
+                networkStatus = data
+                networkError = ""
+            } else {
+                networkError = "Could not load network status"
+            }
+        })
+    }
+
+    function connectWifi(networkKey) {
+        if (!networkKey)
+            return
+        networkError = "Connecting..."
+        http("POST", "/api/system/network/" + encodeURIComponent(networkKey) + "/connect", null, function(status, data) {
+            if (status >= 200 && status < 300 && data) {
+                networkStatus = data
+                networkError = ""
+                loadHealth()
+                loadSnapshot()
+            } else {
+                networkError = "Could not connect to Wi-Fi"
+                loadNetworkStatus()
+            }
+        })
     }
 
     function mergeDevice(updated) {
@@ -289,7 +343,17 @@ ApplicationWindow {
         running: token.length > 0
         repeat: true
         interval: 5000
-        onTriggered: loadHealth()
+        onTriggered: {
+            loadHealth()
+            loadNetworkStatus()
+        }
+    }
+
+    Timer {
+        running: token.length === 0 && !loading
+        repeat: true
+        interval: 5000
+        onTriggered: kioskLogin()
     }
 
     Timer {
@@ -341,6 +405,7 @@ ApplicationWindow {
         id: devicesRadarLoader
 
         property var scannerDevices: allDevices()
+        property bool scannerRefreshing: devicesRefreshing
 
         anchors.fill: parent
         active: activeView === "Devices"
@@ -350,12 +415,28 @@ ApplicationWindow {
 
         onLoaded: {
             item.setDevices(scannerDevices)
+            item.refreshing = scannerRefreshing
             item.deviceClicked.connect(function(device) { toggleDevice(device) })
+            item.refreshRequested.connect(function() { refreshDevicesFromHomeAssistant() })
         }
         onScannerDevicesChanged: {
             if (item)
                 item.setDevices(scannerDevices)
         }
+        onScannerRefreshingChanged: {
+            if (item)
+                item.refreshing = scannerRefreshing
+        }
+    }
+
+    Loader {
+        anchors.fill: parent
+        anchors.margins: 18
+        anchors.bottomMargin: 88
+        active: activeView === "Settings"
+        visible: active
+        sourceComponent: settingsView
+        z: 5
     }
 
     BottomToolbar {
@@ -625,7 +706,58 @@ ApplicationWindow {
                 Text { text: "Settings"; color: "white"; font.pixelSize: 28; font.bold: true }
                 Text { text: "Backend: " + apiBase; color: "#b8cbc8"; font.pixelSize: 16 }
                 Text { text: "User: " + (currentUser ? currentUser.username : "Kiosk"); color: "#b8cbc8"; font.pixelSize: 16 }
-                Button { text: "Refresh snapshot"; onClicked: { loadSnapshot(); loadHealth() } }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 150
+                    radius: 8
+                    color: "#99090b12"
+                    border.color: "#334155"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 8
+
+                        Text { text: "Internet"; color: "white"; font.pixelSize: 18; font.bold: true }
+                        Text {
+                            Layout.fillWidth: true
+                            text: networkStatus && networkStatus.connected
+                                  ? "Connected to " + networkStatus.ssid
+                                  : "Not connected to Wi-Fi"
+                            color: networkStatus && networkStatus.connected ? "#65e0b5" : "#ffd37a"
+                            font.pixelSize: 15
+                            elide: Text.ElideRight
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Repeater {
+                                model: networkStatus && networkStatus.configured ? networkStatus.configured : []
+
+                                Button {
+                                    Layout.preferredWidth: 180
+                                    text: modelData.ssid
+                                    enabled: !(networkStatus && networkStatus.connected && networkStatus.ssid === modelData.ssid)
+                                    onClicked: connectWifi(modelData.key)
+                                }
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: networkError
+                            visible: networkError !== ""
+                            color: networkError === "Connecting..." ? "#b8cbc8" : "#ffaaa5"
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                Button { text: "Refresh status"; onClicked: { loadSnapshot(); loadHealth(); loadNetworkStatus() } }
                 Button { text: "Sign out"; onClicked: logout() }
                 Item { Layout.fillHeight: true }
             }

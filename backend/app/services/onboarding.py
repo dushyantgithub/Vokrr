@@ -20,7 +20,7 @@ from app.domain.models import (
     OnboardingSnapshotResponse,
 )
 from app.services.home_assistant import HomeAssistantClient
-from app.services.registry import DeviceRegistry, normalize_state
+from app.services.registry import DeviceRegistry, is_excluded_entity, normalize_state
 
 
 def _utcnow() -> str:
@@ -33,6 +33,16 @@ def _slugify(value: str) -> str:
 
 def _titleize(value: str) -> str:
     return value.replace("_", " ").replace("-", " ").strip().title() or "Room"
+
+
+def _guess_room_id(entity_id: str, friendly_name: str, rooms: list[OnboardingRoomOption]) -> str | None:
+    text = f"{friendly_name} {entity_id}".lower().replace("_", " ")
+    for room in rooms:
+        room_name = room.name.lower()
+        room_id_text = room.id.lower().replace("_", " ")
+        if text.startswith(room_name) or text.startswith(room_id_text):
+            return room.id
+    return None
 
 
 def infer_device_type(entity_id: str, attributes: dict[str, Any]) -> DeviceType:
@@ -305,6 +315,32 @@ class OnboardingService:
         state_by_entity_id = {row["entity_id"]: row for row in states if "entity_id" in row}
         imported = self.repository.list_imported_devices()
         imported_entity_ids = {entity_id: row for row in imported for entity_id in row.entity_ids}
+        rooms = [
+            OnboardingRoomOption(id=room.id, name=room.name, icon=room.icon)
+            for room in self.registry.all_rooms()
+        ]
+
+        if not registry_rows:
+            registry_rows = []
+            for state_row in states:
+                entity_id = str(state_row.get("entity_id", ""))
+                attributes = state_row.get("attributes", {})
+                friendly_name = str(
+                    attributes.get("friendly_name")
+                    or entity_id.split(".", 1)[-1].replace("_", " ").title()
+                )
+                if is_excluded_entity(entity_id, friendly_name, attributes):
+                    continue
+                domain = entity_id.split(".", 1)[0]
+                if domain not in {"switch", "light", "fan", "climate", "media_player", "cover"}:
+                    continue
+                registry_rows.append(
+                    {
+                        "entity_id": entity_id,
+                        "name": friendly_name,
+                        "area_id": _guess_room_id(entity_id, friendly_name, rooms),
+                    }
+                )
 
         grouped: dict[str, dict[str, Any]] = {}
         for row in registry_rows:
@@ -315,6 +351,13 @@ class OnboardingService:
             if state_row is None:
                 continue
             attributes = state_row.get("attributes", {})
+            if is_excluded_entity(
+                entity_id,
+                str(row.get("name") or row.get("en") or attributes.get("friendly_name") or ""),
+                attributes,
+                row,
+            ):
+                continue
             domain = entity_id.split(".", 1)[0]
             if domain in {"automation", "script", "zone", "person", "sun"}:
                 continue
@@ -346,6 +389,30 @@ class OnboardingService:
                 },
             )
             candidate["entity_ids"].append(entity_id)
+            entity_capabilities = infer_capabilities(entity_id, attributes)
+            merged_capabilities = list(candidate["capabilities"])
+            for capability in entity_capabilities:
+                if capability not in merged_capabilities:
+                    merged_capabilities.append(capability)
+            candidate["capabilities"] = merged_capabilities
+
+            current_capabilities = infer_capabilities(
+                candidate["entity_id"], candidate["state"].attributes
+            )
+            if Capability.toggle in entity_capabilities and Capability.toggle not in current_capabilities:
+                candidate["entity_id"] = entity_id
+                candidate["name"] = str(
+                    row.get("name")
+                    or attributes.get("friendly_name")
+                    or entity_id.split(".", 1)[1].replace("_", " ").title()
+                )
+                candidate["domain"] = domain
+                candidate["type"] = infer_device_type(entity_id, attributes)
+                candidate["state"] = normalize_state(str(state_row.get("state", "unknown")), attributes)
+
+            if not candidate["area_id"]:
+                candidate["area_id"] = row.get("area_id") or row.get("areaId")
+
             existing = imported_entity_ids.get(entity_id)
             if existing is not None:
                 candidate["already_imported"] = True
@@ -354,10 +421,6 @@ class OnboardingService:
                 room = self.registry.get_room(existing.room_id)
                 candidate["room_name"] = room.name if room else _titleize(existing.room_id)
 
-        rooms = [
-            OnboardingRoomOption(id=room.id, name=room.name, icon=room.icon)
-            for room in self.registry.all_rooms()
-        ]
         candidates = [OnboardingCandidate(**value) for value in grouped.values()]
         candidates.sort(key=lambda item: (item.already_imported, item.name.lower()))
         return OnboardingSnapshotResponse(
@@ -397,3 +460,34 @@ class OnboardingService:
             raise RuntimeError("Imported device was not loaded into the registry")
         return device
 
+    async def import_discovered_devices(self) -> list[Device]:
+        snapshot = await self.snapshot()
+        fallback_room_id = snapshot.rooms[0].id if snapshot.rooms else "home_assistant"
+        imported_device_ids: list[str] = []
+
+        for candidate in snapshot.candidates:
+            if candidate.already_imported:
+                continue
+            if Capability.toggle not in candidate.capabilities:
+                continue
+
+            room_id = candidate.area_id or candidate.room_id or fallback_room_id
+            saved = self.repository.save_imported_device(
+                ha_device_id=candidate.ha_device_id,
+                primary_entity_id=candidate.entity_id,
+                entity_ids=candidate.entity_ids,
+                room_id=room_id,
+                display_name=candidate.name,
+                device_type=candidate.type.value,
+                capabilities=[capability.value for capability in candidate.capabilities],
+                is_visible=True,
+                is_favorite=False,
+            )
+            imported_device_ids.append(saved.id)
+
+        self.registry.load()
+        return [
+            device
+            for device_id in imported_device_ids
+            if (device := self.registry.get_device(device_id)) is not None
+        ]

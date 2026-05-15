@@ -16,5 +16,7 @@ install -m 0644 "${APP_DIR}/infra/systemd/vokrr-kiosk.service" /etc/systemd/syst
 systemctl daemon-reload
 systemctl enable vokrr-wifi.service
 systemctl start vokrr-wifi.service
+systemctl restart vokrr-stack.service || true
+systemctl restart vokrr-kiosk.service || true
 
 echo "Vokrr Wi-Fi service installed and started."

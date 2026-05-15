@@ -211,6 +211,21 @@ async def health(state: AppState = Depends(get_app_state)) -> dict:
     return {"ok": True, "home_assistant": ha}
 
 
+@router.get("/api/system/network", dependencies=[Depends(require_user)])
+async def network_status(state: AppState = Depends(get_app_state)) -> dict:
+    return state.network_service.wifi_status()
+
+
+@router.post("/api/system/network/{network_key}/connect", dependencies=[Depends(require_user)])
+async def network_connect(network_key: str, state: AppState = Depends(get_app_state)) -> dict:
+    try:
+        return state.network_service.connect_wifi(network_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
 @router.get("/api/ha/entities", dependencies=[Depends(require_user)])
 async def ha_entities(state: AppState = Depends(get_app_state)) -> list[dict]:
     try:
@@ -229,6 +244,7 @@ async def ha_entities(state: AppState = Depends(get_app_state)) -> list[dict]:
 
 @router.get("/api/rooms", response_model=list[Room], dependencies=[Depends(require_user)])
 async def rooms(state: AppState = Depends(get_app_state)) -> list[Room]:
+    await state.device_service.ensure_ha_device_metadata()
     await state.state_sync.reconcile_once(broadcast=False)
     return state.device_service.rooms()
 
@@ -288,6 +304,17 @@ async def set_room(
 async def devices(state: AppState = Depends(get_app_state)) -> list[Device]:
     await state.state_sync.reconcile_once(broadcast=False)
     return state.device_service.devices()
+
+
+@router.post("/api/devices/refresh", response_model=list[Room], dependencies=[Depends(require_user)])
+async def refresh_devices(state: AppState = Depends(get_app_state)) -> list[Room]:
+    await state.onboarding_service.import_discovered_devices()
+    rooms = await state.device_service.refresh_rooms()
+    await state.websocket_manager.broadcast(
+        "snapshot",
+        {"rooms": [room.model_dump() for room in rooms]},
+    )
+    return rooms
 
 
 @router.get("/api/devices/{device_id}", response_model=Device, dependencies=[Depends(require_user)])

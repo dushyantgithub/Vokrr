@@ -83,7 +83,29 @@ class HomeAssistantClient:
 
     async def entity_registry_for_display(self) -> list[dict[str, Any]]:
         result = await self.websocket_command("config/entity_registry/list_for_display")
-        return result if isinstance(result, list) else []
+        if isinstance(result, list):
+            return result
+        if not isinstance(result, dict):
+            return []
+
+        rows = result.get("entities", [])
+        if not isinstance(rows, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            normalized.append(
+                {
+                    **row,
+                    "entity_id": row.get("entity_id") or row.get("ei"),
+                    "device_id": row.get("device_id") or row.get("di"),
+                    "platform": row.get("platform") or row.get("pl"),
+                    "name": row.get("name") or row.get("en"),
+                }
+            )
+        return normalized
 
     async def subscribe_state_changed(self) -> AsyncIterator[dict[str, Any]]:
         if not self.token:

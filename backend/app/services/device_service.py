@@ -15,8 +15,18 @@ class DeviceService:
     def __init__(self, registry: DeviceRegistry, ha_client: HomeAssistantClient) -> None:
         self.registry = registry
         self.ha_client = ha_client
+        self._ha_device_metadata_loaded = False
+
+    async def ensure_ha_device_metadata(self) -> None:
+        if self._ha_device_metadata_loaded:
+            return
+
+        entity_rows = await self.ha_client.entity_registry_for_display()
+        self.registry.apply_ha_device_ids(entity_rows)
+        self._ha_device_metadata_loaded = True
 
     async def sync_states(self) -> None:
+        await self.ensure_ha_device_metadata()
         seen_entity_ids: set[str] = set()
         for entity in await self.ha_client.states():
             seen_entity_ids.add(entity["entity_id"])
@@ -26,6 +36,12 @@ class DeviceService:
                 attributes=entity.get("attributes", {}),
             )
         self.registry.mark_missing_entities_unavailable(seen_entity_ids)
+
+    async def refresh_rooms(self) -> list[Room]:
+        self.registry.load()
+        self._ha_device_metadata_loaded = False
+        await self.sync_states()
+        return self.rooms()
 
     async def _sync_device_state(self, device: Device) -> Device:
         for entity in await self.ha_client.states():

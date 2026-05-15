@@ -24,6 +24,11 @@ qt_add_qml_module(vokrr-qt
         qml/components/IconContainer.qml
         qml/components/BulbOn.qml
         qml/components/BulbOff.qml
+        qml/components/TubeLightOn.qml
+        qml/components/TubeLightOff.qml
+        qml/components/CeilingFan.qml
+        qml/components/SmartSwitch.qml
+        qml/components/SwitchBoard.qml
         qml/components/SocketOn.qml
         qml/components/SocketOff.qml
 )

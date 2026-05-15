@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     kiosk_auto_login: bool = True
     state_sync_interval_seconds: int = 5
     system_restart_command: str = "nohup /bin/sh -c 'sleep 2 && /sbin/reboot' >/dev/null 2>&1 &"
+    primary_ssid: str = ""
+    primary_ssid_password: str = ""
+    secondary_ssid: str = ""
+    secondary_ssid_password: str = ""
+    wifi_interface: str = "wlan0"
 
     @property
     def cors_origins(self) -> list[str]:

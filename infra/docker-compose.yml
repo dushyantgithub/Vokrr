@@ -31,6 +31,7 @@ services:
       - ../home-assistant/config/devices.yaml:/app/config/devices.yaml:ro
       - ../home-assistant/config/commands.yaml:/app/config/commands.yaml:ro
       - ../backend/data:/app/data
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
     depends_on:
       - homeassistant
 
