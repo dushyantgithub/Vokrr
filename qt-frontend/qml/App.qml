@@ -56,6 +56,9 @@ ApplicationWindow {
     property bool spotifyLoading: false
     property real spotifyProgress: 0.36
     property int spotifyDurationSeconds: 45
+    property var pendingDeviceToggles: ({})
+    property double lastDeviceToggleAt: 0
+    property string lastDeviceToggleId: ""
     readonly property int appNavigatorWidth: 64
     readonly property int appNavigatorHeight: 254
     readonly property int appNavigatorLeftMargin: 8
@@ -512,9 +515,20 @@ ApplicationWindow {
     function toggleDevice(device) {
         if (!device)
             return
+        var now = Date.now()
+        if (pendingDeviceToggles[device.id])
+            return
+        if (lastDeviceToggleAt > 0 && now - lastDeviceToggleAt < 650 && lastDeviceToggleId !== device.id) {
+            console.log("Ignoring overlapping device toggle", device.id, device.name)
+            return
+        }
+        pendingDeviceToggles[device.id] = true
+        lastDeviceToggleAt = now
+        lastDeviceToggleId = device.id
         console.log("Toggling device", device.id, device.name)
         var optimistic = optimisticToggleDevice(device)
         http("POST", "/api/devices/" + encodeURIComponent(device.id) + "/toggle", null, function(status, data) {
+            delete pendingDeviceToggles[device.id]
             if (status >= 200 && status < 300 && data) {
                 mergeDevice(data)
                 pushNotification(device.name + " updated", "info")

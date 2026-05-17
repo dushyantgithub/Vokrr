@@ -282,6 +282,21 @@ class OnboardingRepository:
             raise RuntimeError("Failed to persist imported device")
         return saved
 
+    def delete_imported_devices(self, primary_entity_ids: list[str]) -> int:
+        if not primary_entity_ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in primary_entity_ids)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                DELETE FROM imported_devices
+                WHERE primary_entity_id IN ({placeholders})
+                """,
+                tuple(primary_entity_ids),
+            )
+            return cursor.rowcount
+
 
 class OnboardingService:
     def __init__(
@@ -485,11 +500,13 @@ class OnboardingService:
         }
         state_by_entity_id = {row["entity_id"]: row for row in states if "entity_id" in row}
         changed_device_ids: list[str] = []
+        stale_entity_ids: list[str] = []
 
         for imported in self.repository.list_imported_devices():
             row = row_by_entity_id.get(imported.primary_entity_id)
             state_row = state_by_entity_id.get(imported.primary_entity_id)
             if not row and not state_row:
+                stale_entity_ids.append(imported.primary_entity_id)
                 continue
             row = row or {}
             attributes = state_row.get("attributes", {}) if state_row else {}
@@ -525,7 +542,10 @@ class OnboardingService:
             )
             changed_device_ids.append(saved.id)
 
-        if changed_device_ids:
+        if stale_entity_ids:
+            self.repository.delete_imported_devices(stale_entity_ids)
+
+        if changed_device_ids or stale_entity_ids:
             self.registry.load()
         return [
             device

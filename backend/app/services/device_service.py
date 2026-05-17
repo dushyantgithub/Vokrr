@@ -2,7 +2,7 @@ import asyncio
 
 from app.domain.models import Capability, Device, DeviceSetRequest, Room, RoomSetRequest
 from app.services.home_assistant import HomeAssistantClient
-from app.services.registry import DeviceRegistry
+from app.services.registry import DeviceRegistry, is_unindexed_multigang_base_entity
 
 
 class DeviceNotFoundError(KeyError):
@@ -72,6 +72,43 @@ class DeviceService:
             latest = await self._sync_device_state(device)
         return latest
 
+    def _indexed_sibling_devices(self, device: Device) -> list[Device]:
+        entity_ids = set(self.registry.entity_to_device_id)
+
+        base_entity_ids = [device.entity_id]
+        if "_" in device.entity_id and not device.entity_id.rsplit("_", 1)[-1].isdigit():
+            base_entity_ids.append(device.entity_id.rsplit("_", 1)[0])
+
+        if not any(
+            is_unindexed_multigang_base_entity(base_entity_id, entity_ids)
+            for base_entity_id in base_entity_ids
+        ):
+            return []
+
+        siblings: list[Device] = []
+        seen_device_ids: set[str] = set()
+        for entity_id, sibling_id in self.registry.entity_to_device_id.items():
+            if entity_id == device.entity_id or sibling_id in seen_device_ids:
+                continue
+            if not any(entity_id.startswith(f"{base_entity_id}_") for base_entity_id in base_entity_ids):
+                continue
+            if not entity_id.rsplit("_", 1)[-1].isdigit():
+                continue
+            sibling = self.registry.get_device(sibling_id)
+            if sibling is not None:
+                siblings.append(sibling)
+                seen_device_ids.add(sibling_id)
+        return siblings
+
+    async def _restore_sibling_states(self, sibling_states: dict[str, bool]) -> None:
+        for entity_id, was_on in sibling_states.items():
+            domain = entity_id.split(".", 1)[0]
+            await self.ha_client.call_service(
+                domain,
+                "turn_on" if was_on else "turn_off",
+                {"entity_id": entity_id},
+            )
+
     def rooms(self) -> list[Room]:
         return self.registry.all_rooms()
 
@@ -101,7 +138,14 @@ class DeviceService:
         domain = device.entity_id.split(".", 1)[0]
         expected_is_on = not device.state.is_on
         service = "turn_on" if expected_is_on else "turn_off"
+        siblings = self._indexed_sibling_devices(device)
+        sibling_states = {sibling.entity_id: sibling.state.is_on for sibling in siblings}
         await self.ha_client.call_service(domain, service, {"entity_id": device.entity_id})
+        if siblings:
+            await self._restore_sibling_states(sibling_states)
+            await asyncio.sleep(2)
+            await self.sync_states()
+            return await self._sync_device_state(device)
         return await self._sync_device_state_until(device, expected_is_on)
 
     async def set_room(self, room_id: str, request: RoomSetRequest) -> Room:
@@ -123,12 +167,20 @@ class DeviceService:
         if request.state is not None:
             if Capability.toggle not in device.capabilities:
                 raise UnsupportedCapabilityError(f"{device.id} does not support on/off state")
+            siblings = self._indexed_sibling_devices(device)
+            sibling_states = {sibling.entity_id: sibling.state.is_on for sibling in siblings}
             await self.ha_client.call_service(
                 domain,
                 "turn_on" if request.state else "turn_off",
                 {"entity_id": device.entity_id},
             )
-            device = await self._sync_device_state_until(device, request.state)
+            if siblings:
+                await self._restore_sibling_states(sibling_states)
+                await asyncio.sleep(2)
+                await self.sync_states()
+                device = await self._sync_device_state(device)
+            else:
+                device = await self._sync_device_state_until(device, request.state)
 
         if request.brightness is not None:
             if Capability.brightness not in device.capabilities:

@@ -9,6 +9,16 @@ from app.domain.models import Capability, Device, DeviceState, DeviceType, Room,
 EXCLUDED_ENTITY_MARKERS = ("child_lock", "child lock", "switch_backlight", "switch backlight")
 
 
+def is_unindexed_multigang_base_entity(entity_id: str, entity_ids: set[str]) -> bool:
+    if "." not in entity_id or entity_id.rsplit("_", 1)[-1].isdigit():
+        return False
+
+    return any(
+        candidate.startswith(f"{entity_id}_") and candidate.rsplit("_", 1)[-1].isdigit()
+        for candidate in entity_ids
+    )
+
+
 def is_excluded_entity(
     entity_id: str,
     name: str = "",
@@ -113,7 +123,11 @@ class DeviceRegistry:
 
         room_lookup = {room.id: room for room in rooms}
 
-        for imported in self.onboarding_repository.list_imported_devices() if self.onboarding_repository else []:
+        imported_records = (
+            self.onboarding_repository.list_imported_devices() if self.onboarding_repository else []
+        )
+
+        for imported in imported_records:
             if is_excluded_entity(
                 imported.primary_entity_id,
                 imported.display_name,

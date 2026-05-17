@@ -18,9 +18,13 @@ GlassPanel {
     radius: theme.radiusLg - 2
     padding: theme.space5
     active: deviceActive
-    scale: press.pressed ? 0.98 : 1
 
     Behavior on scale { NumberAnimation { duration: 100; easing.type: Easing.OutQuad } }
+
+    function activatePowerButton() {
+        if (root.actionable)
+            root.activated(root.rawDevice)
+    }
 
     SvgIcon {
         x: 0
@@ -81,15 +85,7 @@ GlassPanel {
             iconColor: theme.iconColor
             darkMode: theme.darkMode
         }
-    }
-
-    MouseArea {
-        id: press
-        anchors.fill: parent
-        onClicked: {
-            if (root.actionable)
-                root.activated(root.rawDevice)
-        }
+        onClicked: root.activatePowerButton()
     }
 
     function iconForType(typeName) {

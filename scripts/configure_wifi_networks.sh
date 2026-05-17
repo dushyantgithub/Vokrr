@@ -66,6 +66,10 @@ network_visible() {
   nmcli -t -f SSID device wifi list ifname "${WIFI_IFACE}" | grep -Fxq "${ssid}"
 }
 
+active_ssid() {
+  nmcli -t -f ACTIVE,SSID device wifi list ifname "${WIFI_IFACE}" | awk -F: '$1 == "yes" { print $2; exit }'
+}
+
 connect_if_visible() {
   local name="$1"
   local ssid="$2"
@@ -125,13 +129,22 @@ main() {
     nmcli device wifi rescan ifname "${WIFI_IFACE}" >/dev/null 2>&1 || true
     sleep 2
 
-    current_ssid="$(nmcli -t -f ACTIVE,SSID device wifi list ifname "${WIFI_IFACE}" | awk -F: '$1 == "yes" { print $2; exit }')"
-    if [[ "${current_ssid}" == "${primary_ssid}" || "${current_ssid}" == "${secondary_ssid}" ]]; then
-      echo "Wi-Fi already connected to a configured Vokrr network."
+    current_ssid="$(active_ssid)"
+    if [[ -n "${primary_ssid}" && "${current_ssid}" == "${primary_ssid}" ]]; then
+      echo "Wi-Fi already connected to primary Vokrr Wi-Fi network."
       exit 0
     fi
 
+    # Primary must always win when visible, even if NetworkManager connected to
+    # secondary first during boot.
     connect_available_network "${primary_ssid}" "${secondary_ssid}" && exit 0
+
+    current_ssid="$(active_ssid)"
+    if [[ -n "${secondary_ssid}" && "${current_ssid}" == "${secondary_ssid}" ]]; then
+      echo "Wi-Fi connected to secondary Vokrr Wi-Fi network; primary is not visible yet."
+      exit 0
+    fi
+
     sleep "${SCAN_INTERVAL_SECONDS}"
   done
 
