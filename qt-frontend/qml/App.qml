@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtMultimedia
 import QtQuick.Shapes
+import QtQuick.Effects
 import QtWebSockets
 import "components" as VokrrComponents
 
@@ -52,6 +53,11 @@ ApplicationWindow {
     property bool spotifyLoading: false
     property real spotifyProgress: 0.36
     property int spotifyDurationSeconds: 45
+    readonly property int appNavigatorWidth: 64
+    readonly property int appNavigatorHeight: 254
+    readonly property int appNavigatorLeftMargin: 16
+    readonly property int appContentGap: 24
+    readonly property int appContentLeftInset: appNavigatorLeftMargin + appNavigatorWidth + appContentGap
 
     readonly property var navItems: [
         { key: "Dashboard", label: "Dashboard", icon: "H" },
@@ -655,6 +661,7 @@ ApplicationWindow {
         property bool scannerRefreshing: devicesRefreshing
 
         anchors.fill: parent
+        anchors.leftMargin: appContentLeftInset
         active: activeView === "Devices"
         visible: active
         source: Qt.resolvedUrl("RadarDemoContent.qml")
@@ -691,6 +698,7 @@ ApplicationWindow {
 
     Loader {
         anchors.fill: parent
+        anchors.leftMargin: appContentLeftInset
         active: activeView === "Settings"
         visible: active
         sourceComponent: settingsView
@@ -706,11 +714,11 @@ ApplicationWindow {
     }
 
     BottomToolbar {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 16
-        width: 188
-        height: 54
+        anchors.left: parent.left
+        anchors.leftMargin: appNavigatorLeftMargin
+        anchors.verticalCenter: parent.verticalCenter
+        width: appNavigatorWidth
+        height: appNavigatorHeight
         opacity: startupLoaderVisible ? 0 : 1
         z: 10
 
@@ -727,7 +735,7 @@ ApplicationWindow {
         anchors.top: parent.top
         anchors.rightMargin: 16
         anchors.topMargin: 16
-        width: Math.min(320, parent.width - 32)
+        width: Math.min(320, parent.width - appContentLeftInset - 32)
         height: 190
         visible: token.length > 0 && activeView === "Dashboard" && opacity > 0
         opacity: startupLoaderVisible ? 0 : 1
@@ -744,9 +752,9 @@ ApplicationWindow {
     CameraFeedPanel {
         anchors.left: parent.left
         anchors.top: parent.top
-        anchors.leftMargin: 16
+        anchors.leftMargin: appContentLeftInset
         anchors.topMargin: 16
-        width: Math.min(320, parent.width * 0.5)
+        width: Math.min(320, (parent.width - appContentLeftInset - 32) * 0.5)
         height: Math.min(240, parent.height * 0.5, width * 0.75)
         visible: token.length > 0 && activeView === "Dashboard" && opacity > 0
         opacity: startupLoaderVisible ? 0 : 1
@@ -1326,16 +1334,15 @@ ApplicationWindow {
         }
     }
 
-    component CameraFeedPanel: Rectangle {
+    component CameraFeedPanel: VokrrComponents.Card {
         id: cameraPanel
 
-        color: "#050809"
-        radius: 8
-        border.color: "#294f55"
-        border.width: 1
-        clip: true
+        cornerRadius: 30
+        contentPadding: 8
+        cardColor: "#212121"
 
         property var selectedFormat: null
+        readonly property real feedRadius: Math.max(0, cornerRadius - contentPadding)
 
         function bestFormat(device) {
             if (!device || !device.videoFormats || device.videoFormats.length === 0)
@@ -1390,40 +1397,59 @@ ApplicationWindow {
             videoOutput: videoOutput
         }
 
-        VideoOutput {
+        Rectangle {
+            id: cameraMask
+
             anchors.fill: parent
-            id: videoOutput
-            fillMode: VideoOutput.PreserveAspectCrop
+            radius: cameraPanel.feedRadius
+            color: "#050809"
+            visible: false
+            layer.enabled: true
         }
 
-        Rectangle {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.margins: 8
-            width: 44
-            height: 20
-            radius: 10
-            color: "#d81f35"
-            visible: camera.active
+        Item {
+            anchors.fill: parent
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                maskEnabled: true
+                maskSource: cameraMask
+            }
+
+            VideoOutput {
+                anchors.fill: parent
+                id: videoOutput
+                fillMode: VideoOutput.PreserveAspectCrop
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: 8
+                width: 44
+                height: 20
+                radius: 10
+                color: "#d81f35"
+                visible: camera.active
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "LIVE"
+                    color: "white"
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+            }
 
             Text {
                 anchors.centerIn: parent
-                text: "LIVE"
-                color: "white"
-                font.pixelSize: 10
-                font.bold: true
+                width: parent.width - 28
+                visible: mediaDevices.videoInputs.length === 0
+                text: "No camera"
+                color: "#b8cbc8"
+                font.pixelSize: 13
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
             }
-        }
-
-        Text {
-            anchors.centerIn: parent
-            width: parent.width - 28
-            visible: mediaDevices.videoInputs.length === 0
-            text: "No camera"
-            color: "#b8cbc8"
-            font.pixelSize: 13
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
         }
     }
 
@@ -1513,7 +1539,7 @@ ApplicationWindow {
         }
     }
 
-    component BottomToolbar: Item {
+    component BottomToolbar: VokrrComponents.Card {
         id: rootItem
 
         readonly property var toolbarItems: [
@@ -1522,9 +1548,12 @@ ApplicationWindow {
             { key: "Settings", icon: "settings" }
         ]
         readonly property int itemCount: toolbarItems.length
-        readonly property real padding: 3
-        readonly property real gap: 2
-        readonly property real itemWidth: (toolbarItemsArea.width - gap * (itemCount - 1)) / itemCount
+        readonly property real gap: 8
+        readonly property real itemHeight: (toolbarItemsArea.height - gap * (itemCount - 1)) / itemCount
+
+        cornerRadius: 30
+        contentPadding: 8
+        cardColor: "#212121"
 
         function activeIndex() {
             for (var i = 0; i < toolbarItems.length; i++) {
@@ -1534,40 +1563,24 @@ ApplicationWindow {
             return 0
         }
 
-        Rectangle {
-            anchors.fill: parent
-            radius: 999
-            color: "#2f27272a"
-            border.color: "#18ffffff"
-            border.width: 1
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: rootItem.padding
-            radius: 999
-            color: "#1f71717a"
-        }
-
         Item {
             id: contentArea
 
             objectName: "#mainToolbar"
             anchors.fill: parent
-            anchors.margins: rootItem.padding
 
             Rectangle {
                 id: activeIndicator
 
-                width: rootItem.itemWidth
-                height: parent.height
-                x: (rootItem.itemWidth + rootItem.gap) * rootItem.activeIndex()
-                radius: 999
+                width: parent.width
+                height: rootItem.itemHeight
+                y: (rootItem.itemHeight + rootItem.gap) * rootItem.activeIndex()
+                radius: 24
                 color: "#1f09090b"
                 border.color: "#16ffffff"
                 border.width: 1
 
-                Behavior on x {
+                Behavior on y {
                     NumberAnimation {
                         duration: 200
                         easing.type: Easing.InOutQuad
@@ -1575,7 +1588,7 @@ ApplicationWindow {
                 }
             }
 
-            Row {
+            Column {
                 id: toolbarItemsArea
 
                 anchors.fill: parent
@@ -1586,8 +1599,8 @@ ApplicationWindow {
                     model: rootItem.toolbarItems
 
                     ToolbarTab {
-                        width: rootItem.itemWidth
-                        height: toolbarItemsArea.height
+                        width: toolbarItemsArea.width
+                        height: rootItem.itemHeight
                         iconName: modelData.icon
                         selected: activeView === modelData.key
                         onClicked: activeView = modelData.key
@@ -1633,13 +1646,11 @@ ApplicationWindow {
         }
     }
 
-    component SpotifyPlayerWidget: Rectangle {
+    component SpotifyPlayerWidget: VokrrComponents.Card {
         id: spotifyWidget
 
-        radius: 35
-        color: "#000000"
-        border.color: "#1c1c1e"
-        border.width: 1
+        cornerRadius: 30
+        cardColor: "#212121"
 
         ColumnLayout {
             anchors.fill: parent

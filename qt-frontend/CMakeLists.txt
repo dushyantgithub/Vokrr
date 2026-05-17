@@ -30,6 +30,7 @@ qt_add_qml_module(vokrr-qt
         qml/components/SmartSwitch.qml
         qml/components/SwitchBoard.qml
         qml/components/Button.qml
+        qml/components/Card.qml
         qml/components/NeumorphicCard.qml
         qml/components/CPU_animation_bg.qml
         qml/components/app_loader.qml
