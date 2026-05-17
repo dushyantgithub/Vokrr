@@ -1185,27 +1185,20 @@ ApplicationWindow {
             VokrrComponents.Button {
                 anchors.left: parent.left
                 anchors.top: parent.top
-                anchors.margins: 18
+                anchors.leftMargin: 18 - appContentLeftInset
+                anchors.topMargin: 18
                 variant: "ghost"
+                darkMode: app.darkMode
                 onClicked: settingsPanel = ""
 
                 contentItem: Component {
-                    Shape {
+                    Image {
                         width: 24
                         height: 24
-                        antialiasing: true
-
-                        ShapePath {
-                            fillColor: "transparent"
-                            strokeColor: "#d7fffb"
-                            strokeWidth: 2.6
-                            capStyle: ShapePath.RoundCap
-                            joinStyle: ShapePath.RoundJoin
-
-                            PathSvg {
-                                path: "M15 5 L8 12 L15 19 M9 12 L20 12"
-                            }
-                        }
+                        source: app.darkMode ? "qrc:/assets/icons/back.svg" : "qrc:/assets/icons/back-black.svg"
+                        fillMode: Image.PreserveAspectFit
+                        mipmap: true
+                        smooth: true
                     }
                 }
             }
@@ -1220,7 +1213,7 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     text: settingsPanel
-                    color: "#ffffff"
+                    color: app.darkMode ? "#e8e8e8" : "#212121"
                     font.pixelSize: 28
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
@@ -1272,7 +1265,7 @@ ApplicationWindow {
                             text: networkStatus && networkStatus.connection_type === "ethernet"
                                   ? (networkStatus.ethernet || "RJ45")
                                   : (networkStatus && networkStatus.ssid ? networkStatus.ssid : "Not connected")
-                            color: "#d7fffb"
+                            color: app.darkMode ? "#e8e8e8" : "#212121"
                             font.pixelSize: 16
                             font.bold: true
                             elide: Text.ElideRight
@@ -1283,7 +1276,7 @@ ApplicationWindow {
                     Text {
                         Layout.fillWidth: true
                         text: "Available networks"
-                        color: "#7f918d"
+                        color: app.darkMode ? "#94a3b8" : "#64748b"
                         font.pixelSize: 12
                         font.bold: true
                         horizontalAlignment: Text.AlignHCenter
@@ -1297,13 +1290,14 @@ ApplicationWindow {
                             width: 320
                             height: 50
                             variant: "ghost"
+                            darkMode: app.darkMode
                             onClicked: connectWifi(modelData.key)
 
                             contentItem: Component {
                                 Text {
                                     width: 280
                                     text: modelData.ssid
-                                    color: "#d7fffb"
+                                    color: app.darkMode ? "#e8e8e8" : "#212121"
                                     font.pixelSize: 15
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
@@ -1365,8 +1359,8 @@ ApplicationWindow {
         Layout.fillWidth: true
         Layout.preferredHeight: 42
         radius: 8
-        color: "#0b1010"
-        border.color: "#18302d"
+        color: app.darkMode ? "#0b1010" : "#f4f4f4"
+        border.color: app.darkMode ? "#18302d" : "#d1d5db"
 
         RowLayout {
             anchors.fill: parent
@@ -1376,7 +1370,7 @@ ApplicationWindow {
 
             Text {
                 text: label
-                color: "#7f918d"
+                color: app.darkMode ? "#94a3b8" : "#64748b"
                 font.pixelSize: 12
                 font.bold: true
                 Layout.preferredWidth: 130
@@ -1385,7 +1379,7 @@ ApplicationWindow {
 
             Text {
                 text: value
-                color: "#d7fffb"
+                color: app.darkMode ? "#e8e8e8" : "#212121"
                 font.pixelSize: 13
                 Layout.fillWidth: true
                 elide: Text.ElideRight
