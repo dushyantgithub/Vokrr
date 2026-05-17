@@ -8,13 +8,13 @@ Item {
     height: 254
 
     default property alias contentData: contentHost.data
-    property color cardColor: "#212121"
-    property color darkShadowColor: "#191919"
-    property color lightShadowColor: "#3c3c3c"
+    property bool darkMode: true
+    property color cardColor: darkMode ? "#212121" : "#e8e8e8"
+    property color darkShadowColor: darkMode ? "#171717" : "#c5c5c5"
     property real cornerRadius: 30
     property real contentPadding: 0
-    property real shadowOffset: 15
-    property real shadowBlur: 0.85
+    property real shadowOffset: 7.5
+    property real shadowBlur: 0.425
 
     Rectangle {
         id: shadowShape
@@ -34,18 +34,6 @@ Item {
         shadowBlur: root.shadowBlur
         shadowHorizontalOffset: root.shadowOffset
         shadowVerticalOffset: root.shadowOffset
-    }
-
-    MultiEffect {
-        anchors.fill: shadowShape
-        source: shadowShape
-        autoPaddingEnabled: true
-        shadowEnabled: true
-        shadowColor: root.lightShadowColor
-        shadowOpacity: 1
-        shadowBlur: root.shadowBlur
-        shadowHorizontalOffset: -root.shadowOffset
-        shadowVerticalOffset: -root.shadowOffset
     }
 
     Rectangle {

@@ -222,6 +222,7 @@ class SpotifyPlaybackResponse(BaseModel):
     is_playing: bool = False
     title: str = "Connect Spotify"
     artist: str = "Premium account required"
+    album_name: str = ""
     album_art_url: str = ""
     progress_ms: int = 0
     duration_ms: int = 45000

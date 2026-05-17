@@ -12,7 +12,12 @@ Item {
     property var deviceStates: ({})
     property var devicePayloads: ({})
     property bool refreshing: false
+    property bool darkMode: true
+    property int navInset: 0
     property string selectedRoomId: ""
+    readonly property color themeTextColor: darkMode ? "#e8e8e8" : "#212121"
+    readonly property color themeMutedColor: darkMode ? "#71717a" : "#64748b"
+    readonly property color themeLineColor: darkMode ? "#334155" : "#cbd5e1"
     signal deviceClicked(var device)
     signal deviceSetRequested(var device, var payload)
     signal refreshRequested()
@@ -301,7 +306,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#212121"
+        color: root.darkMode ? "#212121" : "#e8e8e8"
     }
 
     Item {
@@ -326,7 +331,7 @@ Item {
             height: 1
             width: parent.width
             anchors.bottom: parent.bottom
-            color: "#334155"
+            color: root.themeLineColor
             opacity: 0.8
             z: 41
         }
@@ -360,6 +365,7 @@ Item {
                         id: roomButton
 
                         variant: "shadow"
+                        darkMode: root.darkMode
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.top: parent.top
                         onClicked: root.selectRoom(modelData)
@@ -375,7 +381,7 @@ Item {
                                     anchors.centerIn: parent
                                     visible: parent.iconKind.length === 0
                                     text: modelData && modelData.name ? modelData.name.charAt(0).toUpperCase() : "R"
-                                    color: "#ffffff"
+                                    color: root.themeTextColor
                                     font.pixelSize: 18
                                     font.bold: true
                                 }
@@ -387,7 +393,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#ffffff"
+                                        strokeColor: root.themeTextColor
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -405,7 +411,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#ffffff"
+                                        strokeColor: root.themeTextColor
                                         strokeWidth: 2
                                         joinStyle: ShapePath.RoundJoin
 
@@ -414,7 +420,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#ffffff"
+                                        strokeColor: root.themeTextColor
                                         strokeWidth: 2
                                         joinStyle: ShapePath.RoundJoin
 
@@ -423,7 +429,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#ffffff"
+                                        strokeColor: root.themeTextColor
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -433,7 +439,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#ffffff"
+                                        strokeColor: root.themeTextColor
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -449,7 +455,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#ffffff"
+                                        strokeColor: root.themeTextColor
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -466,7 +472,7 @@ Item {
                                     antialiasing: true
 
                                     ShapePath {
-                                        fillColor: "#ffffff"
+                                        fillColor: root.themeTextColor
                                         strokeColor: "transparent"
 
                                         PathSvg {
@@ -475,7 +481,7 @@ Item {
                                     }
 
                                     ShapePath {
-                                        fillColor: "#ffffff"
+                                        fillColor: root.themeTextColor
                                         strokeColor: "transparent"
 
                                         PathSvg {
@@ -504,7 +510,7 @@ Item {
                         anchors.topMargin: 12
                         horizontalAlignment: Text.AlignHCenter
                         text: root.deviceLabel(modelData)
-                        color: "#d7fffb"
+                        color: root.themeTextColor
                         font.pixelSize: 10
                         font.bold: true
                         elide: Text.ElideRight
@@ -541,7 +547,7 @@ Item {
             anchors.centerIn: parent
             visible: root.selectedRoomId ? root.devices.length === 0 : root.roomItems.length === 0
             text: root.selectedRoomId ? "No devices in this room" : "No Home Assistant rooms"
-            color: "#71717a"
+            color: root.themeMutedColor
             font.pixelSize: 11
             font.bold: true
             horizontalAlignment: Text.AlignHCenter
@@ -553,29 +559,22 @@ Item {
 
         visible: root.selectedRoomId.length > 0
         variant: "ghost"
+        darkMode: root.darkMode
         anchors.top: parent.top
         anchors.left: parent.left
-        anchors.margins: 18
+        anchors.topMargin: 18
+        anchors.leftMargin: 18 - root.navInset
         z: 82
         onClicked: root.backToRooms()
 
         contentItem: Component {
-            Shape {
+            Image {
                 width: 24
                 height: 24
-                antialiasing: true
-
-                ShapePath {
-                    fillColor: "transparent"
-                    strokeColor: "#d7fffb"
-                    strokeWidth: 2.6
-                    capStyle: ShapePath.RoundCap
-                    joinStyle: ShapePath.RoundJoin
-
-                    PathSvg {
-                        path: "M15 5 L8 12 L15 19 M9 12 L20 12"
-                    }
-                }
+                source: root.darkMode ? "qrc:/assets/icons/back.svg" : "qrc:/assets/icons/back-black.svg"
+                fillMode: Image.PreserveAspectFit
+                mipmap: true
+                smooth: true
             }
         }
     }
@@ -585,7 +584,8 @@ Item {
 
         variant: "shadow"
         selected: root.refreshing
-        anchors.top: parent.top
+        darkMode: root.darkMode
+        anchors.bottom: parent.bottom
         anchors.right: parent.right
         anchors.margins: 18
         z: 80
@@ -621,7 +621,7 @@ Item {
 
                     ShapePath {
                         fillColor: "transparent"
-                        strokeColor: "#ffffff"
+                        strokeColor: root.themeTextColor
                         strokeWidth: 2
                         capStyle: ShapePath.RoundCap
                         joinStyle: ShapePath.RoundJoin

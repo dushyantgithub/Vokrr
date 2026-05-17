@@ -16,6 +16,7 @@ Item {
 
     property string variant: "light"
     property bool selected: false
+    property bool darkMode: true
     property alias contentItem: contentLoader.sourceComponent
 
     signal clicked()
@@ -50,11 +51,13 @@ Item {
                 return root.selected ? "#dbeafe" : "#ffffff"
 
             if (root.variant === "shadow")
-                return root.selected ? "#1f3d3a" : "#111717"
+                return root.selected
+                        ? (root.darkMode ? "#1f3d3a" : "#d7f2e9")
+                        : (root.darkMode ? "#111717" : "#f4f4f4")
 
             if (root.variant === "ghost")
                 return mouseArea.pressed || root.selected
-                        ? "#f1f5f9"
+                        ? (root.darkMode ? "#1affffff" : "#1A212121")
                         : "transparent"
 
             return root.selected ? "#111827" : "#18181b"
@@ -70,7 +73,7 @@ Item {
                 return "#e5e7eb"
 
             if (root.variant === "shadow")
-                return "#28413d"
+                return root.darkMode ? "#28413d" : "#d1d5db"
 
             return "transparent"
         }

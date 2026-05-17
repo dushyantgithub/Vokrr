@@ -115,6 +115,7 @@ class SpotifyService:
             is_playing=bool(data.get("is_playing")),
             title=item.get("name") or "Spotify",
             artist=artists or (item.get("show") or {}).get("name") or "Unknown artist",
+            album_name=(item.get("album") or {}).get("name", ""),
             album_art_url=images[0].get("url", "") if images else "",
             progress_ms=int(data.get("progress_ms") or 0),
             duration_ms=int(item.get("duration_ms") or 45000),

@@ -6,16 +6,17 @@ import QtQuick.Shapes
 import QtQuick.Effects
 import QtWebSockets
 import "components" as VokrrComponents
+import "roomfinal" as RoomFinal
 
 ApplicationWindow {
     id: app
     visible: true
-    width: 800
+    width: 640
     height: 480
-    minimumWidth: 800
+    minimumWidth: 640
     minimumHeight: 480
     title: "Vokrr"
-    color: "#212121"
+    color: darkMode ? "#212121" : "#e8e8e8"
 
     property string apiBase: vokrrBackendApiBase || "http://localhost:8080"
     property string token: ""
@@ -41,10 +42,12 @@ ApplicationWindow {
     property string toastMessage: ""
     property bool toastVisible: false
     property bool refreshInProgress: false
+    property bool darkMode: true
     property var pendingAuthRetries: []
     property bool spotifyPlaybackActive: true
     property string spotifyTrackTitle: "Glow"
     property string spotifyArtistName: "Echo"
+    property string spotifyAlbumName: ""
     property string spotifyDeviceName: "Vokrr Home"
     property string spotifyAlbumArtUrl: ""
     property bool spotifyConfigured: false
@@ -55,8 +58,8 @@ ApplicationWindow {
     property int spotifyDurationSeconds: 45
     readonly property int appNavigatorWidth: 64
     readonly property int appNavigatorHeight: 254
-    readonly property int appNavigatorLeftMargin: 16
-    readonly property int appContentGap: 24
+    readonly property int appNavigatorLeftMargin: 8
+    readonly property int appContentGap: 12
     readonly property int appContentLeftInset: appNavigatorLeftMargin + appNavigatorWidth + appContentGap
 
     readonly property var navItems: [
@@ -414,6 +417,7 @@ ApplicationWindow {
                 spotifyPlaybackActive = data.is_playing || false
                 spotifyTrackTitle = data.title || (spotifyNeedsAuth ? "Connect Spotify" : "Spotify")
                 spotifyArtistName = data.artist || ""
+                spotifyAlbumName = data.album_name || ""
                 spotifyAlbumArtUrl = data.album_art_url || ""
                 spotifyDeviceName = data.device_name || "Spotify"
                 spotifyDurationSeconds = Math.max(1, Math.round((data.duration_ms || 45000) / 1000))
@@ -654,6 +658,22 @@ ApplicationWindow {
     }
 
     Loader {
+        anchors.fill: parent
+        active: token.length > 0 && activeView === "Dashboard"
+        visible: active
+        sourceComponent: roomDashboardComponent
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 4
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    Loader {
         id: devicesRadarLoader
 
         property var scannerDevices: allDevices()
@@ -677,10 +697,19 @@ ApplicationWindow {
 
         onLoaded: {
             item.setRooms(scannerRooms)
+            item.darkMode = app.darkMode
+            item.navInset = appContentLeftInset
             item.refreshing = scannerRefreshing
             item.deviceClicked.connect(function(device) { toggleDevice(device) })
             item.deviceSetRequested.connect(function(device, payload) { setDevice(device, payload) })
             item.refreshRequested.connect(function() { refreshDevicesFromHomeAssistant() })
+        }
+        Connections {
+            target: app
+            function onDarkModeChanged() {
+                if (devicesRadarLoader.item)
+                    devicesRadarLoader.item.darkMode = app.darkMode
+            }
         }
         onScannerRoomsChanged: {
             if (item)
@@ -713,6 +742,20 @@ ApplicationWindow {
         }
     }
 
+    RoomFinal.ThemeToggle {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 16
+        anchors.topMargin: 16
+        width: 76
+        height: 26
+        theme: null
+        checked: !app.darkMode
+        visible: token.length > 0 && activeView !== "Dashboard" && !startupLoaderVisible
+        z: 12
+        onToggled: app.darkMode = !app.darkMode
+    }
+
     BottomToolbar {
         anchors.left: parent.left
         anchors.leftMargin: appNavigatorLeftMargin
@@ -737,7 +780,7 @@ ApplicationWindow {
         anchors.topMargin: 16
         width: Math.min(320, parent.width - appContentLeftInset - 32)
         height: 190
-        visible: token.length > 0 && activeView === "Dashboard" && opacity > 0
+        visible: false
         opacity: startupLoaderVisible ? 0 : 1
         z: 9
 
@@ -756,7 +799,7 @@ ApplicationWindow {
         anchors.topMargin: 16
         width: Math.min(320, (parent.width - appContentLeftInset - 32) * 0.5)
         height: Math.min(240, parent.height * 0.5, width * 0.75)
-        visible: token.length > 0 && activeView === "Dashboard" && opacity > 0
+        visible: false
         opacity: startupLoaderVisible ? 0 : 1
         z: 8
 
@@ -770,7 +813,7 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: "#212121"
+        color: darkMode ? "#212121" : "#e8e8e8"
         opacity: startupLoaderVisible ? 1 : 0
         visible: opacity > 0
         z: 100
@@ -781,7 +824,7 @@ ApplicationWindow {
 
             onLoaded: {
                 item.size = 200
-                item.loaderColor = "#4FA593"
+                item.loaderColor = "#A0373B"
                 item.trackColor = "#71717a"
                 item.duration = 2000
                 item.running = Qt.binding(function() { return startupLoaderVisible })
@@ -825,6 +868,37 @@ ApplicationWindow {
 
         Behavior on opacity {
             NumberAnimation { duration: 180; easing.type: Easing.OutQuad }
+        }
+    }
+
+    Component {
+        id: roomDashboardComponent
+
+        RoomFinal.RoomDashboard {
+            rooms: app.rooms
+            mediaConnected: spotifyConnected && !spotifyNeedsAuth
+            mediaPlaying: spotifyPlaybackActive
+            mediaTitle: spotifyTrackTitle
+            mediaArtist: spotifyArtistName
+            mediaAlbum: spotifyAlbumName
+            mediaArtUrl: spotifyAlbumArtUrl
+            darkMode: app.darkMode
+            onRoomSelected: function(roomId) {
+                if (roomId)
+                    selectedRoomId = roomId
+            }
+            onDeviceActionRequested: function(device) {
+                if (device && device.state)
+                    toggleDevice(device)
+                else
+                    showToast("No action available")
+            }
+            onMediaActionRequested: function(action) {
+                spotifyAction(action)
+            }
+            onThemeModeRequested: function(nextDarkMode) {
+                app.darkMode = nextDarkMode
+            }
         }
     }
 
@@ -1076,7 +1150,7 @@ ApplicationWindow {
     Component {
         id: settingsView
         Rectangle {
-            color: "#212121"
+            color: app.darkMode ? "#212121" : "#e8e8e8"
 
             Loader {
                 anchors.fill: parent
@@ -1106,7 +1180,7 @@ ApplicationWindow {
     Component {
         id: settingsPlaceholderView
         Rectangle {
-            color: "#212121"
+            color: app.darkMode ? "#212121" : "#e8e8e8"
 
             VokrrComponents.Button {
                 anchors.left: parent.left
@@ -1339,7 +1413,7 @@ ApplicationWindow {
 
         cornerRadius: 30
         contentPadding: 8
-        cardColor: "#212121"
+        darkMode: app.darkMode
 
         property var selectedFormat: null
         readonly property real feedRadius: Math.max(0, cornerRadius - contentPadding)
@@ -1553,7 +1627,7 @@ ApplicationWindow {
 
         cornerRadius: 30
         contentPadding: 8
-        cardColor: "#212121"
+        darkMode: app.darkMode
 
         function activeIndex() {
             for (var i = 0; i < toolbarItems.length; i++) {
@@ -1576,8 +1650,8 @@ ApplicationWindow {
                 height: rootItem.itemHeight
                 y: (rootItem.itemHeight + rootItem.gap) * rootItem.activeIndex()
                 radius: 24
-                color: "#1f09090b"
-                border.color: "#16ffffff"
+                color: app.darkMode ? "#1f09090b" : "#18212121"
+                border.color: app.darkMode ? "#16ffffff" : "#16212121"
                 border.width: 1
 
                 Behavior on y {
@@ -1618,7 +1692,7 @@ ApplicationWindow {
         signal clicked()
 
         function iconPath() {
-            return "qrc:/assets/icons/tab-" + iconName + (selected ? "-active" : "") + ".svg"
+            return "qrc:/assets/icons/" + (app.darkMode ? "tab-white/" : "tab-black/") + "tab-" + iconName + (selected ? "-active" : "") + ".svg"
         }
 
         Rectangle {
@@ -1626,10 +1700,11 @@ ApplicationWindow {
             width: parent.width
             height: parent.height
             radius: 999
-            color: pressArea.pressed ? "#14ffffff" : "transparent"
+            color: pressArea.pressed ? (app.darkMode ? "#14ffffff" : "#14212121") : "transparent"
         }
 
         Image {
+            id: toolbarIconSource
             anchors.centerIn: parent
             width: 24
             height: 24
@@ -1650,7 +1725,7 @@ ApplicationWindow {
         id: spotifyWidget
 
         cornerRadius: 30
-        cardColor: "#212121"
+        darkMode: app.darkMode
 
         ColumnLayout {
             anchors.fill: parent
@@ -1852,7 +1927,7 @@ ApplicationWindow {
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.clearRect(0, 0, width, height)
-                ctx.fillStyle = "#ffffff"
+                ctx.fillStyle = app.darkMode ? "#e8e8e8" : "#212121"
                 ctx.strokeStyle = ctx.fillStyle
                 ctx.lineWidth = Math.max(2, width * 0.1)
                 ctx.lineCap = "round"
@@ -1927,7 +2002,7 @@ ApplicationWindow {
     component GradientBackground: Item {
         Rectangle {
             anchors.fill: parent
-            color: "#212121"
+            color: app.darkMode ? "#212121" : "#e8e8e8"
         }
 
         Canvas {
