@@ -204,3 +204,32 @@ class VoiceCommandResponse(BaseModel):
 class VoiceEventRequest(BaseModel):
     status: str
     message: str
+
+
+class SpotifyAuthUrlResponse(BaseModel):
+    configured: bool
+    connected: bool = False
+    auth_url: str | None = None
+    redirect_uri: str | None = None
+    scopes: list[str] = Field(default_factory=list)
+    detail: str | None = None
+
+
+class SpotifyPlaybackResponse(BaseModel):
+    configured: bool
+    connected: bool
+    needs_auth: bool = False
+    is_playing: bool = False
+    title: str = "Connect Spotify"
+    artist: str = "Premium account required"
+    album_art_url: str = ""
+    progress_ms: int = 0
+    duration_ms: int = 45000
+    device_name: str = ""
+    device_id: str | None = None
+    detail: str | None = None
+
+
+class SpotifyControlResponse(BaseModel):
+    ok: bool = True
+    detail: str = "ok"

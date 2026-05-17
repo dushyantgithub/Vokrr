@@ -6,7 +6,7 @@ import yaml
 from app.domain.models import Capability, Device, DeviceState, DeviceType, Room, Scene, SceneAction
 
 
-EXCLUDED_ENTITY_MARKERS = ("child_lock", "child lock")
+EXCLUDED_ENTITY_MARKERS = ("child_lock", "child lock", "switch_backlight", "switch backlight")
 
 
 def is_excluded_entity(
@@ -30,6 +30,7 @@ def is_excluded_entity(
         )
         if value is not None
     ).lower()
+    text = f"{text} {text.replace('_', ' ').replace('-', ' ')}"
     return any(marker in text for marker in EXCLUDED_ENTITY_MARKERS)
 
 

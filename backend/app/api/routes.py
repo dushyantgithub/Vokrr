@@ -4,6 +4,7 @@ import subprocess
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse
 
 from app.domain.models import (
     ActivityLogEntry,
@@ -24,6 +25,9 @@ from app.domain.models import (
     RoomSetRequest,
     Scene,
     SceneRunResponse,
+    SpotifyAuthUrlResponse,
+    SpotifyControlResponse,
+    SpotifyPlaybackResponse,
     SystemRestartResponse,
     VoiceCommandRequest,
     VoiceCommandResponse,
@@ -40,6 +44,7 @@ from app.services.auth import (
 )
 from app.services.device_service import DeviceNotFoundError, UnsupportedCapabilityError
 from app.services.scene_service import InvalidSceneActionError, SceneNotFoundError
+from app.services.spotify import SPOTIFY_SCOPES
 
 router = APIRouter()
 
@@ -261,6 +266,88 @@ async def system_info() -> dict:
         "python": platform.python_version(),
         "qt": qt_version or "Unknown",
     }
+
+
+@router.get(
+    "/api/spotify/auth-url",
+    response_model=SpotifyAuthUrlResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_auth_url(state: AppState = Depends(get_app_state)) -> SpotifyAuthUrlResponse:
+    if not state.spotify_service.configured:
+        return SpotifyAuthUrlResponse(
+            configured=False,
+            connected=False,
+            redirect_uri=state.settings.spotify_redirect_uri,
+            scopes=[],
+            detail="Spotify app credentials are not configured",
+        )
+    return SpotifyAuthUrlResponse(
+        configured=True,
+        connected=state.spotify_service.token_path.exists(),
+        auth_url=state.spotify_service.auth_url(),
+        redirect_uri=state.settings.spotify_redirect_uri,
+        scopes=SPOTIFY_SCOPES,
+    )
+
+
+@router.get("/api/spotify/callback", response_class=HTMLResponse)
+async def spotify_callback(
+    code: str | None = None,
+    state_param: str | None = Query(default=None, alias="state"),
+    error: str | None = None,
+    state: AppState = Depends(get_app_state),
+) -> HTMLResponse:
+    await state.spotify_service.handle_callback(code=code, state=state_param, error=error)
+    return HTMLResponse(
+        """
+        <!doctype html>
+        <html>
+          <head><title>Spotify connected</title></head>
+          <body style="background:#050505;color:#fff;font-family:system-ui;padding:32px">
+            <h1>Spotify connected</h1>
+            <p>You can close this tab and return to Vokrr.</p>
+          </body>
+        </html>
+        """
+    )
+
+
+@router.get(
+    "/api/spotify/playback",
+    response_model=SpotifyPlaybackResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_playback(state: AppState = Depends(get_app_state)) -> SpotifyPlaybackResponse:
+    return await state.spotify_service.playback()
+
+
+@router.post(
+    "/api/spotify/player/{action}",
+    response_model=SpotifyControlResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_control(
+    action: str,
+    state: AppState = Depends(get_app_state),
+) -> SpotifyControlResponse:
+    await state.spotify_service.control(action)
+    return SpotifyControlResponse(detail=f"Spotify {action} requested")
+
+
+@router.get("/api/spotify/devices", dependencies=[Depends(require_user)])
+async def spotify_devices(state: AppState = Depends(get_app_state)) -> dict:
+    return {"devices": await state.spotify_service.devices()}
+
+
+@router.post(
+    "/api/spotify/transfer/vokrr",
+    response_model=SpotifyControlResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_transfer_vokrr(state: AppState = Depends(get_app_state)) -> SpotifyControlResponse:
+    device = await state.spotify_service.transfer_to_device_named("Vokrr", play=True)
+    return SpotifyControlResponse(detail=f"Transferred playback to {device.get('name', 'Vokrr')}")
 
 
 @router.post("/api/system/network/{network_key}/connect", dependencies=[Depends(require_user)])

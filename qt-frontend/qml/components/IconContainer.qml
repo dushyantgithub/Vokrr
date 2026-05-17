@@ -9,14 +9,24 @@ Item {
     property var device: null
     property bool stateOverrideActive: false
     property bool stateOverrideOn: false
+    property int localFanSpeedPercent: 60
     readonly property bool isLight: device && device.type === "light"
     readonly property bool isSwitchDevice: device && device.type === "switch"
-    readonly property bool isSocket: root.isSwitchDevice && device && device.name && device.name.toLowerCase().indexOf("socket") !== -1
+    readonly property string deviceClass: device && device.state && device.state.attributes && device.state.attributes.device_class ? String(device.state.attributes.device_class).toLowerCase() : ""
+    readonly property bool isSocket: root.isSwitchDevice
+                                     && device
+                                     && (root.deviceClass === "outlet"
+                                         || root.deviceClass === "socket"
+                                         || (device.name && device.name.toLowerCase().indexOf("socket") !== -1)
+                                         || (device.entity_id && device.entity_id.toLowerCase().indexOf("socket") !== -1))
     readonly property bool isSwitch: root.isSwitchDevice && !root.isSocket
     readonly property bool isFan: device && device.type === "fan"
     readonly property bool isOn: stateOverrideActive ? stateOverrideOn : (device && device.state && device.state.is_on)
     readonly property bool isTubeLight: root.isLight && device && device.name && device.name.toLowerCase().indexOf("tubelight") !== -1
+    readonly property bool supportsFanSpeed: root.isFan && device && device.capabilities && device.capabilities.indexOf("percentage") !== -1
+    readonly property int fanPercentage: device && device.state && device.state.percentage !== null && device.state.percentage !== undefined ? device.state.percentage : localFanSpeedPercent
     signal clicked()
+    signal speedChanged(var device, int percentage)
 
     function deviceArtSource() {
         if (root.isTubeLight)
@@ -42,24 +52,18 @@ Item {
         return "#fff2c7"
     }
 
-    function fanSpeed() {
-        var percentage = device && device.state ? device.state.percentage : null
-        if (percentage === null || percentage === undefined)
-            return 1400
-        return Math.max(650, 2600 - Math.round(percentage * 18))
-    }
-
-    width: 132
-    height: 122
+    width: root.isFan ? 180 : 132
+    height: root.isFan ? 190 : 122
     opacity: 0
     scale: 0.86
     transformOrigin: Item.Center
+    clip: true
 
     Item {
         id: iconArea
 
-        width: 96
-        height: 96
+        width: root.isFan ? 180 : 96
+        height: root.isFan ? 158 : 96
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
 
@@ -79,9 +83,10 @@ Item {
             id: deviceArt
 
             anchors.centerIn: parent
+            anchors.horizontalCenterOffset: 0
             width: root.isTubeLight ? 560 : (root.isSocket ? 260 : (root.isSwitch ? 180 : (root.isFan ? 520 : 220)))
             height: root.isTubeLight ? 140 : (root.isSocket ? 380 : (root.isSwitch ? 300 : (root.isFan ? 420 : 420)))
-            scale: root.isTubeLight ? 0.17 : (root.isSocket ? 0.125 : (root.isSwitch ? 0.24 : (root.isFan ? 0.22 : 0.144)))
+            scale: root.isTubeLight ? 0.17 : (root.isSocket ? 0.125 : (root.isSwitch ? 0.24 : (root.isFan ? 0.36 : 0.144)))
             visible: root.isLight || root.isSwitchDevice || root.isFan
             source: root.deviceArtSource()
         }
@@ -95,7 +100,7 @@ Item {
 
         Binding {
             target: deviceArt.item
-            property: "spinning"
+            property: "isOn"
             value: root.isOn
             when: root.isFan && deviceArt.item
         }
@@ -109,16 +114,48 @@ Item {
 
         Binding {
             target: deviceArt.item
-            property: "speed"
-            value: root.fanSpeed()
+            property: "speedPercent"
+            value: root.fanPercentage
             when: root.isFan && deviceArt.item
+        }
+
+        Binding {
+            target: deviceArt.item
+            property: "speedControlEnabled"
+            value: root.supportsFanSpeed
+            when: root.isFan && deviceArt.item
+        }
+
+        Connections {
+            target: root.isFan ? deviceArt.item : null
+
+            function onToggled() {
+                root.clicked()
+            }
+
+            function onSpeedChanged(percentage) {
+                root.localFanSpeedPercent = percentage
+                if (root.supportsFanSpeed)
+                    root.speedChanged(root.device, percentage)
+            }
+        }
+
+        MouseArea {
+            width: root.isTubeLight ? 96 : (root.isSocket ? 38 : (root.isSwitch ? 46 : (root.isLight ? 54 : 60)))
+            height: root.isTubeLight ? 28 : (root.isSocket ? 58 : (root.isSwitch ? 76 : (root.isLight ? 64 : 60)))
+            anchors.centerIn: parent
+            visible: !root.isFan
+            enabled: visible
+            z: 20
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.clicked()
         }
     }
 
     Text {
         width: parent.width
         anchors.top: iconArea.bottom
-        anchors.topMargin: 6
+        anchors.topMargin: root.isTubeLight ? 3 : 6
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.text
         font.pixelSize: 10
@@ -129,12 +166,6 @@ Item {
         maximumLineCount: 2
         elide: Text.ElideRight
     }
-
-    TapHandler {
-        acceptedDevices: PointerDevice.TouchScreen | PointerDevice.Mouse | PointerDevice.TouchPad
-        onTapped: root.clicked()
-    }
-
     SequentialAnimation {
         running: true
         PauseAnimation { duration: root.delay }

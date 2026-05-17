@@ -5,7 +5,7 @@ project(VokrrQt VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Qml WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Quick Qml Multimedia WebSockets)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -30,6 +30,7 @@ qt_add_qml_module(vokrr-qt
         qml/components/SmartSwitch.qml
         qml/components/SwitchBoard.qml
         qml/components/Button.qml
+        qml/components/NeumorphicCard.qml
         qml/components/CPU_animation_bg.qml
         qml/components/app_loader.qml
         qml/components/SocketOn.qml
@@ -56,6 +57,7 @@ target_link_libraries(vokrr-qt
     PRIVATE
         Qt6::Quick
         Qt6::Qml
+        Qt6::Multimedia
         Qt6::WebSockets
 )
 

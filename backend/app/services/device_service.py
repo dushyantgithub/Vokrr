@@ -1,3 +1,5 @@
+import asyncio
+
 from app.domain.models import Capability, Device, DeviceSetRequest, Room, RoomSetRequest
 from app.services.home_assistant import HomeAssistantClient
 from app.services.registry import DeviceRegistry
@@ -58,6 +60,18 @@ class DeviceService:
             f"{device.entity_id} is missing or unavailable in Home Assistant"
         )
 
+    async def _sync_device_state_until(self, device: Device, expected_is_on: bool) -> Device:
+        latest = await self._sync_device_state(device)
+        for _ in range(16):
+            if latest.state.is_on == expected_is_on and latest.state.state not in {
+                "unknown",
+                "unavailable",
+            }:
+                return latest
+            await asyncio.sleep(0.5)
+            latest = await self._sync_device_state(device)
+        return latest
+
     def rooms(self) -> list[Room]:
         return self.registry.all_rooms()
 
@@ -85,9 +99,10 @@ class DeviceService:
             device = await self._sync_device_state(device)
 
         domain = device.entity_id.split(".", 1)[0]
-        service = "turn_off" if device.state.is_on else "turn_on"
+        expected_is_on = not device.state.is_on
+        service = "turn_on" if expected_is_on else "turn_off"
         await self.ha_client.call_service(domain, service, {"entity_id": device.entity_id})
-        return await self._sync_device_state(device)
+        return await self._sync_device_state_until(device, expected_is_on)
 
     async def set_room(self, room_id: str, request: RoomSetRequest) -> Room:
         room = self.room(room_id)
@@ -113,7 +128,7 @@ class DeviceService:
                 "turn_on" if request.state else "turn_off",
                 {"entity_id": device.entity_id},
             )
-            device = await self._sync_device_state(device)
+            device = await self._sync_device_state_until(device, request.state)
 
         if request.brightness is not None:
             if Capability.brightness not in device.capabilities:

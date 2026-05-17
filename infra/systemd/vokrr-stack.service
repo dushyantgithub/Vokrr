@@ -9,6 +9,7 @@ Type=oneshot
 User=dushyant
 WorkingDirectory=/home/dushyant/apps/Vokrr
 RemainAfterExit=yes
+ExecStartPre=/home/dushyant/apps/Vokrr/scripts/select_audio_output.sh
 ExecStart=/usr/bin/docker compose -f /home/dushyant/apps/Vokrr/infra/docker-compose.yml --profile cloudflare up -d --build --remove-orphans
 ExecStop=/usr/bin/docker compose -f /home/dushyant/apps/Vokrr/infra/docker-compose.yml --profile cloudflare down
 

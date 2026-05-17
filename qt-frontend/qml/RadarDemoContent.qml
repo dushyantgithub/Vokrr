@@ -14,6 +14,7 @@ Item {
     property bool refreshing: false
     property string selectedRoomId: ""
     signal deviceClicked(var device)
+    signal deviceSetRequested(var device, var payload)
     signal refreshRequested()
 
     function deviceKey(device) {
@@ -65,6 +66,7 @@ Item {
                     id: groupKey,
                     is_switchboard: true,
                     ha_device_id: device.ha_device_id,
+                    name: "Switch Board",
                     room_name: device.room_name,
                     device_keys: [],
                     devices: []
@@ -247,8 +249,8 @@ Item {
             return ""
         if (device.is_room)
             return device.name || "Room"
-        if (device.room_name)
-            return device.room_name
+        if (device.is_switchboard)
+            return device.name || device.room_name || "Switches"
         return device.name || device.id || "Device"
     }
 
@@ -270,7 +272,15 @@ Item {
             return 118
         if (isSwitchboard(item))
             return Math.max(132, ((item.devices || []).length * 46) + 22)
+        if (item && item.type === "fan")
+            return 180
         return 132
+    }
+
+    function itemHeight(item) {
+        if (item && item.type === "fan")
+            return 190
+        return 122
     }
 
     function scatterX(index, areaWidth, visualWidth) {
@@ -281,17 +291,17 @@ Item {
         return Math.max(10, Math.min(areaWidth - visualWidth - 10, (base + jitter) * areaWidth))
     }
 
-    function scatterY(index, areaHeight) {
+    function scatterY(index, areaHeight, visualHeight) {
         var positions = [0.08, 0.18, 0.10, 0.36, 0.42, 0.62, 0.68, 0.58, 0.82, 0.78, 0.28, 0.88]
         var base = positions[index % positions.length]
         var cycle = Math.floor(index / positions.length)
         var jitter = (((index * 29 + cycle * 17) % 21) - 10) / Math.max(1, areaHeight)
-        return Math.max(8, Math.min(areaHeight - 118, (base + jitter) * areaHeight))
+        return Math.max(8, Math.min(areaHeight - visualHeight, (base + jitter) * areaHeight))
     }
 
     Rectangle {
         anchors.fill: parent
-        color: "#000000"
+        color: "#212121"
     }
 
     Item {
@@ -335,9 +345,10 @@ Item {
 
             Item {
                 width: root.itemWidth(modelData)
-                height: 122
+                height: root.itemHeight(modelData)
                 x: root.scatterX(index, scatterLayer.width, width)
-                y: root.scatterY(index, scatterLayer.height)
+                y: root.scatterY(index, scatterLayer.height, height)
+                clip: true
 
                 Item {
                     visible: !!(modelData && modelData.is_room)
@@ -364,7 +375,7 @@ Item {
                                     anchors.centerIn: parent
                                     visible: parent.iconKind.length === 0
                                     text: modelData && modelData.name ? modelData.name.charAt(0).toUpperCase() : "R"
-                                    color: "#111827"
+                                    color: "#ffffff"
                                     font.pixelSize: 18
                                     font.bold: true
                                 }
@@ -376,7 +387,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#111827"
+                                        strokeColor: "#ffffff"
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -394,7 +405,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#111827"
+                                        strokeColor: "#ffffff"
                                         strokeWidth: 2
                                         joinStyle: ShapePath.RoundJoin
 
@@ -403,7 +414,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#111827"
+                                        strokeColor: "#ffffff"
                                         strokeWidth: 2
                                         joinStyle: ShapePath.RoundJoin
 
@@ -412,7 +423,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#111827"
+                                        strokeColor: "#ffffff"
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -422,7 +433,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#111827"
+                                        strokeColor: "#ffffff"
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -438,7 +449,7 @@ Item {
 
                                     ShapePath {
                                         fillColor: "transparent"
-                                        strokeColor: "#111827"
+                                        strokeColor: "#ffffff"
                                         strokeWidth: 2
                                         capStyle: ShapePath.RoundCap
                                         joinStyle: ShapePath.RoundJoin
@@ -455,7 +466,7 @@ Item {
                                     antialiasing: true
 
                                     ShapePath {
-                                        fillColor: "#111827"
+                                        fillColor: "#ffffff"
                                         strokeColor: "transparent"
 
                                         PathSvg {
@@ -464,7 +475,7 @@ Item {
                                     }
 
                                     ShapePath {
-                                        fillColor: "#111827"
+                                        fillColor: "#ffffff"
                                         strokeColor: "transparent"
 
                                         PathSvg {
@@ -510,6 +521,7 @@ Item {
                     iconSource: "qrc:/assets/icons/bulb.svg"
                     anchors.centerIn: parent
                     onClicked: root.deviceClicked(modelData)
+                    onSpeedChanged: function(device, percentage) { root.deviceSetRequested(device, { percentage: percentage }) }
                 }
 
                 SwitchBoard {
@@ -609,7 +621,7 @@ Item {
 
                     ShapePath {
                         fillColor: "transparent"
-                        strokeColor: "#111827"
+                        strokeColor: "#ffffff"
                         strokeWidth: 2
                         capStyle: ShapePath.RoundCap
                         joinStyle: ShapePath.RoundJoin

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtMultimedia
 import QtQuick.Shapes
 import QtWebSockets
 import "components" as VokrrComponents
@@ -13,7 +14,7 @@ ApplicationWindow {
     minimumWidth: 800
     minimumHeight: 480
     title: "Vokrr"
-    color: "#071014"
+    color: "#212121"
 
     property string apiBase: vokrrBackendApiBase || "http://localhost:8080"
     property string token: ""
@@ -38,6 +39,19 @@ ApplicationWindow {
     property var systemInfo: ({})
     property string toastMessage: ""
     property bool toastVisible: false
+    property bool refreshInProgress: false
+    property var pendingAuthRetries: []
+    property bool spotifyPlaybackActive: true
+    property string spotifyTrackTitle: "Glow"
+    property string spotifyArtistName: "Echo"
+    property string spotifyDeviceName: "Vokrr Home"
+    property string spotifyAlbumArtUrl: ""
+    property bool spotifyConfigured: false
+    property bool spotifyConnected: false
+    property bool spotifyNeedsAuth: true
+    property bool spotifyLoading: false
+    property real spotifyProgress: 0.36
+    property int spotifyDurationSeconds: 45
 
     readonly property var navItems: [
         { key: "Dashboard", label: "Dashboard", icon: "H" },
@@ -76,6 +90,47 @@ ApplicationWindow {
                 list.push(devices[j])
         }
         return list
+    }
+
+    function mergeRoomsSnapshot(nextRooms) {
+        var incomingRooms = nextRooms || []
+        var currentDevices = {}
+        for (var i = 0; i < rooms.length; i++) {
+            var roomDevices = rooms[i].devices || []
+            for (var j = 0; j < roomDevices.length; j++) {
+                var current = roomDevices[j]
+                if (current && current.id)
+                    currentDevices[current.id] = current
+            }
+        }
+
+        var mergedRooms = []
+        for (var roomIndex = 0; roomIndex < incomingRooms.length; roomIndex++) {
+            var room = JSON.parse(JSON.stringify(incomingRooms[roomIndex]))
+            var devices = room.devices || []
+            for (var deviceIndex = 0; deviceIndex < devices.length; deviceIndex++) {
+                var incoming = devices[deviceIndex]
+                var existing = incoming && incoming.id ? currentDevices[incoming.id] : null
+                if (existing && JSON.stringify(existing) === JSON.stringify(incoming))
+                    devices[deviceIndex] = existing
+            }
+            room.devices = devices
+            mergedRooms.push(room)
+        }
+
+        rooms = mergedRooms
+        if (!selectedRoomId && rooms.length)
+            selectedRoomId = rooms[0].id
+        if (selectedRoomId && !hasRoom(selectedRoomId) && rooms.length)
+            selectedRoomId = rooms[0].id
+    }
+
+    function hasRoom(roomId) {
+        for (var i = 0; i < rooms.length; i++) {
+            if (rooms[i].id === roomId)
+                return true
+        }
+        return false
     }
 
     function selectedRoom() {
@@ -124,7 +179,41 @@ ApplicationWindow {
         notifications = next.slice(0, 12)
     }
 
-    function http(method, path, body, callback, auth) {
+    function retryPendingAuthRequests(success) {
+        var pending = pendingAuthRetries
+        pendingAuthRetries = []
+        for (var i = 0; i < pending.length; i++)
+            pending[i](success)
+    }
+
+    function refreshSession(callback) {
+        if (!refreshToken) {
+            callback(false)
+            return
+        }
+
+        pendingAuthRetries.push(callback)
+        if (refreshInProgress)
+            return
+
+        refreshInProgress = true
+        http("POST", "/api/auth/refresh", { refresh_token: refreshToken }, function(status, data) {
+            refreshInProgress = false
+            if (status >= 200 && status < 300 && data && data.access_token) {
+                token = data.access_token || ""
+                refreshToken = data.refresh_token || ""
+                currentUser = data.user || currentUser
+                ws.active = false
+                ws.active = true
+                retryPendingAuthRequests(true)
+            } else {
+                logout()
+                retryPendingAuthRequests(false)
+            }
+        }, false, true)
+    }
+
+    function http(method, path, body, callback, auth, alreadyRetried) {
         var xhr = new XMLHttpRequest()
         xhr.open(method, apiBase + path)
         xhr.setRequestHeader("Content-Type", "application/json")
@@ -139,6 +228,15 @@ ApplicationWindow {
                     data = JSON.parse(xhr.responseText)
             } catch (e) {
                 data = null
+            }
+            if (auth !== false && xhr.status === 401 && refreshToken && !alreadyRetried) {
+                refreshSession(function(success) {
+                    if (success)
+                        http(method, path, body, callback, auth, true)
+                    else
+                        callback(xhr.status, data)
+                })
+                return
             }
             callback(xhr.status, data)
         }
@@ -165,6 +263,7 @@ ApplicationWindow {
         loadSnapshot()
         loadHealth()
         loadNetworkStatus()
+        loadSpotifyStatus()
         ws.active = true
     }
 
@@ -195,9 +294,7 @@ ApplicationWindow {
             return
         http("GET", "/api/rooms", null, function(status, data) {
             if (status >= 200 && status < 300 && data) {
-                rooms = data
-                if (!selectedRoomId && rooms.length)
-                    selectedRoomId = rooms[0].id
+                mergeRoomsSnapshot(data)
             } else {
                 pushNotification("Could not load rooms", "error")
             }
@@ -214,9 +311,7 @@ ApplicationWindow {
         devicesRefreshing = true
         http("POST", "/api/devices/refresh", null, function(status, data) {
             if (status >= 200 && status < 300 && data) {
-                rooms = data
-                if (!selectedRoomId && rooms.length)
-                    selectedRoomId = rooms[0].id
+                mergeRoomsSnapshot(data)
                 pushNotification("Devices refreshed", "info")
             } else {
                 pushNotification("Could not refresh devices", "error")
@@ -268,6 +363,80 @@ ApplicationWindow {
         toastMessage = message
         toastVisible = true
         toastTimer.restart()
+    }
+
+    function spotifyAction(action) {
+        if (spotifyNeedsAuth || !spotifyConnected) {
+            openSpotifyLogin()
+            return
+        }
+        if (action === "playPause") {
+            var target = spotifyPlaybackActive ? "pause" : "play"
+            spotifyPlaybackActive = !spotifyPlaybackActive
+            http("POST", "/api/spotify/player/" + target, null, function(status) {
+                if (status >= 200 && status < 300)
+                    loadSpotifyStatus()
+                else {
+                    spotifyPlaybackActive = !spotifyPlaybackActive
+                    showToast("Spotify control failed")
+                }
+            })
+            return
+        }
+        if (action === "previous" || action === "next") {
+            http("POST", "/api/spotify/player/" + action, null, function(status) {
+                if (status >= 200 && status < 300)
+                    loadSpotifyStatus()
+                else
+                    showToast("Spotify control failed")
+            })
+            return
+        }
+        openSpotifyLogin()
+    }
+
+    function loadSpotifyStatus() {
+        if (!token || spotifyLoading)
+            return
+        spotifyLoading = true
+        http("GET", "/api/spotify/playback", null, function(status, data) {
+            spotifyLoading = false
+            if (status >= 200 && status < 300 && data) {
+                spotifyConfigured = data.configured || false
+                spotifyConnected = data.connected || false
+                spotifyNeedsAuth = data.needs_auth || false
+                spotifyPlaybackActive = data.is_playing || false
+                spotifyTrackTitle = data.title || (spotifyNeedsAuth ? "Connect Spotify" : "Spotify")
+                spotifyArtistName = data.artist || ""
+                spotifyAlbumArtUrl = data.album_art_url || ""
+                spotifyDeviceName = data.device_name || "Spotify"
+                spotifyDurationSeconds = Math.max(1, Math.round((data.duration_ms || 45000) / 1000))
+                spotifyProgress = Math.max(0, Math.min(1, (data.progress_ms || 0) / Math.max(1, data.duration_ms || 45000)))
+            } else {
+                spotifyNeedsAuth = true
+                spotifyTrackTitle = "Connect Spotify"
+                spotifyArtistName = "Tap play to authorize"
+            }
+        })
+    }
+
+    function openSpotifyLogin() {
+        if (!token)
+            return
+        http("GET", "/api/spotify/auth-url", null, function(status, data) {
+            if (status >= 200 && status < 300 && data && data.auth_url) {
+                Qt.openUrlExternally(data.auth_url)
+                showToast("Complete Spotify login in the browser")
+            } else {
+                showToast("Spotify auth is not ready")
+            }
+        })
+    }
+
+    function spotifyTimeLabel(seconds) {
+        var value = Math.max(0, Math.floor(seconds))
+        var remainder = value % 60
+        return Math.floor(value / 60) + ":" + (remainder < 10 ? "0" : "") + remainder
     }
 
     function connectWifi(networkKey) {
@@ -412,6 +581,20 @@ ApplicationWindow {
         onTriggered: toastVisible = false
     }
 
+    Timer {
+        running: spotifyPlaybackActive && token.length > 0
+        repeat: true
+        interval: 1000
+        onTriggered: spotifyProgress = spotifyProgress >= 1 ? 0 : Math.min(1, spotifyProgress + (1 / spotifyDurationSeconds))
+    }
+
+    Timer {
+        running: token.length > 0
+        repeat: true
+        interval: 5000
+        onTriggered: loadSpotifyStatus()
+    }
+
     WebSocket {
         id: ws
         active: false
@@ -419,9 +602,7 @@ ApplicationWindow {
         onTextMessageReceived: function(message) {
             var event = JSON.parse(message)
             if (event.event === "snapshot") {
-                rooms = event.payload.rooms || []
-                if (!selectedRoomId && rooms.length)
-                    selectedRoomId = rooms[0].id
+                mergeRoomsSnapshot(event.payload.rooms || [])
             } else if (event.event === "device.updated") {
                 mergeDevice(event.payload)
             } else if (event.event === "voice.command") {
@@ -491,6 +672,7 @@ ApplicationWindow {
             item.setRooms(scannerRooms)
             item.refreshing = scannerRefreshing
             item.deviceClicked.connect(function(device) { toggleDevice(device) })
+            item.deviceSetRequested.connect(function(device, payload) { setDevice(device, payload) })
             item.refreshRequested.connect(function() { refreshDevicesFromHomeAssistant() })
         }
         onScannerRoomsChanged: {
@@ -540,9 +722,47 @@ ApplicationWindow {
         }
     }
 
+    SpotifyPlayerWidget {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 16
+        anchors.topMargin: 16
+        width: Math.min(320, parent.width - 32)
+        height: 190
+        visible: token.length > 0 && activeView === "Dashboard" && opacity > 0
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 9
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    CameraFeedPanel {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: 16
+        anchors.topMargin: 16
+        width: Math.min(320, parent.width * 0.5)
+        height: Math.min(240, parent.height * 0.5, width * 0.75)
+        visible: token.length > 0 && activeView === "Dashboard" && opacity > 0
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 8
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
-        color: "#000000"
+        color: "#212121"
         opacity: startupLoaderVisible ? 1 : 0
         visible: opacity > 0
         z: 100
@@ -848,7 +1068,7 @@ ApplicationWindow {
     Component {
         id: settingsView
         Rectangle {
-            color: "#000000"
+            color: "#212121"
 
             Loader {
                 anchors.fill: parent
@@ -878,7 +1098,7 @@ ApplicationWindow {
     Component {
         id: settingsPlaceholderView
         Rectangle {
-            color: "#000000"
+            color: "#212121"
 
             VokrrComponents.Button {
                 anchors.left: parent.left
@@ -1106,6 +1326,107 @@ ApplicationWindow {
         }
     }
 
+    component CameraFeedPanel: Rectangle {
+        id: cameraPanel
+
+        color: "#050809"
+        radius: 8
+        border.color: "#294f55"
+        border.width: 1
+        clip: true
+
+        property var selectedFormat: null
+
+        function bestFormat(device) {
+            if (!device || !device.videoFormats || device.videoFormats.length === 0)
+                return null
+
+            var best = null
+            var bestScore = -1000000
+            for (var i = 0; i < device.videoFormats.length; i++) {
+                var format = device.videoFormats[i]
+                if (!format || !format.resolution)
+                    continue
+
+                var width = format.resolution.width
+                var height = format.resolution.height
+                var fps = format.maxFrameRate || 0
+                var pixels = width * height
+                var score = -Math.abs(pixels - 307200) / 1000 + fps * 10
+
+                if (width === 640 && height === 480)
+                    score += 10000
+                if (fps >= 30)
+                    score += 500
+
+                if (score > bestScore) {
+                    bestScore = score
+                    best = format
+                }
+            }
+            return best
+        }
+
+        function refreshFormat() {
+            selectedFormat = bestFormat(camera.cameraDevice)
+        }
+
+        MediaDevices {
+            id: mediaDevices
+            onVideoInputsChanged: cameraPanel.refreshFormat()
+        }
+
+        CaptureSession {
+            camera: Camera {
+                id: camera
+                active: cameraPanel.visible && mediaDevices.videoInputs.length > 0
+                cameraDevice: mediaDevices.defaultVideoInput
+                cameraFormat: cameraPanel.selectedFormat
+
+                Component.onCompleted: cameraPanel.refreshFormat()
+                onCameraDeviceChanged: cameraPanel.refreshFormat()
+            }
+
+            videoOutput: videoOutput
+        }
+
+        VideoOutput {
+            anchors.fill: parent
+            id: videoOutput
+            fillMode: VideoOutput.PreserveAspectCrop
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.margins: 8
+            width: 44
+            height: 20
+            radius: 10
+            color: "#d81f35"
+            visible: camera.active
+
+            Text {
+                anchors.centerIn: parent
+                text: "LIVE"
+                color: "white"
+                font.pixelSize: 10
+                font.bold: true
+            }
+        }
+
+        Text {
+            anchors.centerIn: parent
+            width: parent.width - 28
+            visible: mediaDevices.videoInputs.length === 0
+            text: "No camera"
+            color: "#b8cbc8"
+            font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+        }
+    }
+
     component DeviceHero: Rectangle {
         property var device: null
         radius: 8
@@ -1312,15 +1633,296 @@ ApplicationWindow {
         }
     }
 
+    component SpotifyPlayerWidget: Rectangle {
+        id: spotifyWidget
+
+        radius: 35
+        color: "#000000"
+        border.color: "#1c1c1e"
+        border.width: 1
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 18
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 64
+                spacing: 12
+
+                Rectangle {
+                    Layout.preferredWidth: 64
+                    Layout.preferredHeight: 64
+                    radius: 16
+                    clip: true
+
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: "#ff9a9e" }
+                        GradientStop { position: 1; color: "#fad0c4" }
+                    }
+
+                    Image {
+                        anchors.fill: parent
+                        source: spotifyAlbumArtUrl
+                        visible: spotifyAlbumArtUrl.length > 0
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        smooth: true
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: spotifyTrackTitle
+                        color: "#ffffff"
+                        font.pixelSize: 21
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: spotifyNeedsAuth ? "Tap play to connect" : spotifyArtistName
+                        color: "#d1d1d6"
+                        font.pixelSize: 14
+                        elide: Text.ElideRight
+                    }
+                }
+
+                RowLayout {
+                    Layout.preferredWidth: 38
+                    Layout.preferredHeight: 32
+                    Layout.alignment: Qt.AlignBottom
+                    spacing: 2
+
+                    Repeater {
+                        model: 8
+
+                        Rectangle {
+                            property real barHeight: 6 + ((index % 4) * 4)
+
+                            Layout.preferredWidth: 3
+                            Layout.preferredHeight: barHeight
+                            Layout.alignment: Qt.AlignBottom
+                            radius: 2
+
+                            gradient: Gradient {
+                                orientation: Gradient.Vertical
+                                GradientStop { position: 0; color: "#00c6ff" }
+                                GradientStop { position: 1; color: "#0072ff" }
+                            }
+
+                            SequentialAnimation on barHeight {
+                                running: spotifyPlaybackActive
+                                loops: Animation.Infinite
+                                PauseAnimation { duration: index * 100 }
+                                NumberAnimation { to: 26; duration: 400; easing.type: Easing.InOutQuad }
+                                NumberAnimation { to: 6; duration: 400; easing.type: Easing.InOutQuad }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Text {
+                        text: spotifyTimeLabel(spotifyProgress * spotifyDurationSeconds)
+                        color: "#8e8e93"
+                        font.pixelSize: 12
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Text {
+                        text: spotifyTimeLabel((1 - spotifyProgress) * spotifyDurationSeconds)
+                        color: "#8e8e93"
+                        font.pixelSize: 12
+                    }
+                }
+
+                Rectangle {
+                    id: musicProgressTrack
+
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 4
+                    radius: 2
+                    color: "#1affffff"
+                    clip: false
+
+                    Rectangle {
+                        width: parent.width * spotifyProgress
+                        height: parent.height
+                        radius: parent.radius
+
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0; color: "#00c6ff" }
+                            GradientStop { position: 1; color: "#0072ff" }
+                        }
+                    }
+
+                    Rectangle {
+                        x: Math.max(0, Math.min(parent.width - width, parent.width * spotifyProgress - width / 2))
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 10
+                        height: 10
+                        radius: 5
+                        color: "#ffffff"
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 54
+                    spacing: 12
+
+                    Item { Layout.fillWidth: true }
+
+                    MusicIconButton {
+                        iconName: "previous"
+                        onClicked: spotifyAction("previous")
+                    }
+
+                    MusicIconButton {
+                        iconName: spotifyPlaybackActive ? "pause" : "play"
+                        onClicked: spotifyAction("playPause")
+                    }
+
+                    MusicIconButton {
+                        iconName: "next"
+                        onClicked: spotifyAction("next")
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    MusicIconButton {
+                        iconName: "radar"
+                        onClicked: spotifyAction("device")
+                    }
+                }
+            }
+        }
+    }
+
+    component MusicIconButton: Rectangle {
+        id: musicButton
+
+        property string iconName: "play"
+        property bool highlighted: false
+        signal clicked()
+
+        onIconNameChanged: iconCanvas.requestPaint()
+        onHighlightedChanged: iconCanvas.requestPaint()
+
+        Layout.preferredWidth: 52
+        Layout.preferredHeight: 52
+        radius: 26
+        color: musicPressArea.pressed ? "#1affffff" : "transparent"
+        border.width: 0
+
+        Canvas {
+            id: iconCanvas
+
+            anchors.centerIn: parent
+            width: musicButton.iconName === "play" || musicButton.iconName === "pause" ? 30 : 22
+            height: width
+            antialiasing: true
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = "#ffffff"
+                ctx.strokeStyle = ctx.fillStyle
+                ctx.lineWidth = Math.max(2, width * 0.1)
+                ctx.lineCap = "round"
+                ctx.lineJoin = "round"
+
+                if (musicButton.iconName === "play") {
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.3, height * 0.2)
+                    ctx.lineTo(width * 0.78, height * 0.5)
+                    ctx.lineTo(width * 0.3, height * 0.8)
+                    ctx.closePath()
+                    ctx.fill()
+                } else if (musicButton.iconName === "pause") {
+                    ctx.fillRect(width * 0.28, height * 0.22, width * 0.17, height * 0.56)
+                    ctx.fillRect(width * 0.56, height * 0.22, width * 0.17, height * 0.56)
+                } else if (musicButton.iconName === "previous") {
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.92, height * 0.18)
+                    ctx.lineTo(width * 0.44, height * 0.5)
+                    ctx.lineTo(width * 0.92, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.5, height * 0.18)
+                    ctx.lineTo(width * 0.08, height * 0.5)
+                    ctx.lineTo(width * 0.5, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.05, height * 0.2)
+                    ctx.lineTo(width * 0.05, height * 0.8)
+                    ctx.stroke()
+                } else if (musicButton.iconName === "next") {
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.08, height * 0.18)
+                    ctx.lineTo(width * 0.56, height * 0.5)
+                    ctx.lineTo(width * 0.08, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.5, height * 0.18)
+                    ctx.lineTo(width * 0.92, height * 0.5)
+                    ctx.lineTo(width * 0.5, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.95, height * 0.2)
+                    ctx.lineTo(width * 0.95, height * 0.8)
+                    ctx.stroke()
+                } else {
+                    ctx.fillStyle = "transparent"
+                    ctx.beginPath()
+                    ctx.arc(width * 0.5, height * 0.5, width * 0.42, Math.PI * 1.2, Math.PI * 1.92)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(width * 0.5, height * 0.5, width * 0.27, Math.PI * 1.2, Math.PI * 1.92)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(width * 0.5, height * 0.5, width * 0.1, 0, Math.PI * 2)
+                    ctx.stroke()
+                }
+            }
+        }
+
+        MouseArea {
+            id: musicPressArea
+            anchors.fill: parent
+            onClicked: musicButton.clicked()
+        }
+    }
+
     component GradientBackground: Item {
         Rectangle {
             anchors.fill: parent
-            color: "#071014"
+            color: "#212121"
         }
 
         Canvas {
             anchors.fill: parent
             antialiasing: true
+            visible: false
 
             onPaint: {
                 var ctx = getContext("2d")

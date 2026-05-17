@@ -7,7 +7,7 @@ ApplicationWindow {
     width: 800
     height: 480
     visible: true
-    color: "#000000"
+    color: "#212121"
     title: "Radar Effect Demo"
 
     RadarDemoContent {

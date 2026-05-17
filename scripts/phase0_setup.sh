@@ -76,6 +76,31 @@ configure_official_touch_display() {
   echo "Configured official Raspberry Pi 7-inch DSI touch display at 800x480."
 }
 
+configure_audio_outputs() {
+  local config_file
+  config_file="$(boot_config_file)"
+  local cmdline_file
+  cmdline_file="$(boot_cmdline_file)"
+
+  sed -i -E \
+    -e 's/[[:space:]]*snd_bcm2835\.enable_headphones=0//g' \
+    -e 's/[[:space:]]*snd_bcm2835\.enable_hdmi=0//g' \
+    "${cmdline_file}"
+
+  if grep -q '^# *dtparam=audio=on' "${config_file}"; then
+    sed -i -E 's/^# *dtparam=audio=on.*/dtparam=audio=on/' "${config_file}"
+  elif ! grep -q '^dtparam=audio=on' "${config_file}"; then
+    printf '\n# Onboard/aux audio output for Vokrr audio fallback\ndtparam=audio=on\n' >> "${config_file}"
+  fi
+
+  if ! grep -q '^dtoverlay=max98357a' "${config_file}"; then
+    printf '\n# Vokrr speaker output: Adafruit MAX98357A I2S Class D amplifier\ndtoverlay=max98357a\n' >> "${config_file}"
+  fi
+
+  /home/dushyant/apps/Vokrr/scripts/select_audio_output.sh || true
+  echo "Configured Vokrr audio output detection: aux/headphone/USB playback first, MAX98357A fallback."
+}
+
 install_docker() {
   if ! command -v docker >/dev/null 2>&1; then
     curl -fsSL https://get.docker.com | sh
@@ -106,6 +131,9 @@ ufw --force enable
 
 run_step "Ensuring official Raspberry Pi 7-inch DSI display configured"
 configure_official_touch_display
+
+run_step "Ensuring Vokrr audio outputs configured"
+configure_audio_outputs
 
 run_step "Installing Docker engine and compose plugin"
 install_docker

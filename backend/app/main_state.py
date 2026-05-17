@@ -10,6 +10,7 @@ from app.services.onboarding import OnboardingRepository, OnboardingService
 from app.services.network import NetworkService
 from app.services.registry import DeviceRegistry
 from app.services.scene_service import SceneService
+from app.services.spotify import SpotifyService
 from app.services.state_sync import StateSyncService
 from app.services.websocket_manager import WebSocketManager
 
@@ -28,6 +29,7 @@ class AppState:
     intent_service: IntentService
     state_sync: StateSyncService
     network_service: NetworkService
+    spotify_service: SpotifyService
 
 
 _state: AppState | None = None
@@ -53,9 +55,11 @@ def build_app_state() -> AppState:
         ha_client,
         registry,
         websocket_manager,
+        discovery_importer=onboarding_service.import_discovered_devices,
         interval_seconds=settings.state_sync_interval_seconds,
     )
     network_service = NetworkService(settings)
+    spotify_service = SpotifyService(settings)
     return AppState(
         settings=settings,
         auth_service=auth_service,
@@ -69,6 +73,7 @@ def build_app_state() -> AppState:
         intent_service=intent_service,
         state_sync=state_sync,
         network_service=network_service,
+        spotify_service=spotify_service,
     )
 
 

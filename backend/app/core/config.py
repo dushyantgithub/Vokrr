@@ -37,12 +37,21 @@ class Settings(BaseSettings):
     app_registration_code: str = ""
     kiosk_auto_login: bool = True
     state_sync_interval_seconds: int = 5
-    system_restart_command: str = "nohup /bin/sh -c 'sleep 2 && /sbin/reboot' >/dev/null 2>&1 &"
+    system_restart_command: str = (
+        "nohup /bin/sh -c 'sleep 2 && "
+        "nsenter --target 1 --mount --uts --ipc --net --pid /bin/systemctl reboot' "
+        ">/dev/null 2>&1 &"
+    )
     primary_ssid: str = ""
     primary_ssid_password: str = ""
     secondary_ssid: str = ""
     secondary_ssid_password: str = ""
     wifi_interface: str = "wlan0"
+    spotify_app_name: str = "Vokrr"
+    spotify_app_client_id: str = ""
+    spotify_app_client_secret: str = ""
+    spotify_redirect_uri: str = "http://127.0.0.1:8080/api/spotify/callback"
+    spotify_token_path: str = "/app/data/spotify_tokens.json"
 
     @property
     def cors_origins(self) -> list[str]:

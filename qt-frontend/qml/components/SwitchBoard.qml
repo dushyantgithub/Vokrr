@@ -25,6 +25,11 @@ Item {
     function isSocketDevice(device) {
         if (!device || device.type !== "switch")
             return false
+        if (device.state && device.state.attributes) {
+            var deviceClass = String(device.state.attributes.device_class || "").toLowerCase()
+            if (deviceClass === "outlet" || deviceClass === "socket")
+                return true
+        }
         var text = ((device.name || "") + " " + (device.entity_id || "")).toLowerCase()
         return text.indexOf("socket") !== -1
     }
@@ -34,6 +39,7 @@ Item {
     opacity: 0
     scale: 0.86
     transformOrigin: Item.Center
+    clip: true
 
     Rectangle {
         id: board
@@ -84,9 +90,12 @@ Item {
                         source: root.deviceIsOn(modelData) ? "SocketOn.qml" : "SocketOff.qml"
                     }
 
-                    TapHandler {
-                        acceptedDevices: PointerDevice.TouchScreen | PointerDevice.Mouse | PointerDevice.TouchPad
-                        onTapped: root.deviceClicked(modelData)
+                    MouseArea {
+                        width: root.isSocketDevice(modelData) ? 38 : 46
+                        height: root.isSocketDevice(modelData) ? 58 : 76
+                        anchors.centerIn: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.deviceClicked(modelData)
                     }
                 }
             }
