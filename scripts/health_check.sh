@@ -4,16 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+load_env_file() {
+  local file="$1" key value
+  while IFS='=' read -r key value || [[ -n "${key}" ]]; do
+    [[ -z "${key}" || "${key}" == \#* ]] && continue
+    [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    export "${key}=${value}"
+  done < "${file}"
+}
+
 if [[ -f scripts/.env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source scripts/.env
-  set +a
+  load_env_file scripts/.env
 elif [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
+  load_env_file .env
 fi
 
 APP_USERNAME="${APP_BOOTSTRAP_ADMIN_USERNAME:-${APP_USERNAME:-admin}}"
@@ -44,6 +47,17 @@ check_http() {
 echo "== Vokrr health check =="
 
 docker compose ps
+
+if scripts/select_audio_output.sh >/tmp/vokrr-audio-select.out 2>&1; then
+  cat /tmp/vokrr-audio-select.out
+  if [[ -f backend/data/audio-output.env ]]; then
+    grep -E '^(VOKRR_AUDIO_DEVICE|VOKRR_AUDIO_OUTPUT_KIND)=' backend/data/audio-output.env || true
+  fi
+else
+  echo "[FAIL] audio output detection failed"
+  cat /tmp/vokrr-audio-select.out 2>/dev/null || true
+  exit 1
+fi
 
 check_http "backend health" "${BACKEND_URL}/api/system/health" 200
 check_http "home assistant API unauthenticated probe" "${HA_URL}/api/" 401

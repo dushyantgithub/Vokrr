@@ -17,3 +17,36 @@ history:
 
 logbook:
 
+wake_on_lan:
+
+automation:
+  - alias: "Turn On Hall Samsung TV with Wake-on-LAN"
+    id: turn_on_hall_samsung_tv_with_wake_on_lan
+    triggers:
+      - trigger: samsungtv.turn_on
+        entity_id: media_player.samsung_cu7700_55_ua55cu7700klxl
+    actions:
+      - repeat:
+          count: 5
+          sequence:
+            - action: wake_on_lan.send_magic_packet
+              data:
+                mac: b0:e4:5c:19:e6:00
+                broadcast_address: 192.168.1.255
+                broadcast_port: 9
+            - action: wake_on_lan.send_magic_packet
+              data:
+                mac: c8:12:0b:25:db:d4
+                broadcast_address: 192.168.1.255
+                broadcast_port: 9
+            - action: wake_on_lan.send_magic_packet
+              data:
+                mac: b0:e4:5c:19:e6:00
+                broadcast_address: 192.168.1.255
+                broadcast_port: 7
+            - action: wake_on_lan.send_magic_packet
+              data:
+                mac: c8:12:0b:25:db:d4
+                broadcast_address: 192.168.1.255
+                broadcast_port: 7
+            - delay: "00:00:01"

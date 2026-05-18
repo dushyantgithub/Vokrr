@@ -72,13 +72,6 @@ rooms:
         capabilities:
           - toggle
 
-      - id: bedroom_aircon_child_lock
-        name: Aircon Child Lock
-        type: switch
-        entity_id: switch.bedroom_aircon_child_lock
-        capabilities:
-          - toggle
-
 scenes:
   - id: all_lights_off
     name: All Lights Off

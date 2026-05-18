@@ -1,5 +1,10 @@
+import platform
+import shutil
+import subprocess
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse
 
 from app.domain.models import (
     ActivityLogEntry,
@@ -20,6 +25,9 @@ from app.domain.models import (
     RoomSetRequest,
     Scene,
     SceneRunResponse,
+    SpotifyAuthUrlResponse,
+    SpotifyControlResponse,
+    SpotifyPlaybackResponse,
     SystemRestartResponse,
     VoiceCommandRequest,
     VoiceCommandResponse,
@@ -36,6 +44,7 @@ from app.services.auth import (
 )
 from app.services.device_service import DeviceNotFoundError, UnsupportedCapabilityError
 from app.services.scene_service import InvalidSceneActionError, SceneNotFoundError
+from app.services.spotify import SPOTIFY_SCOPES
 
 router = APIRouter()
 
@@ -211,6 +220,146 @@ async def health(state: AppState = Depends(get_app_state)) -> dict:
     return {"ok": True, "home_assistant": ha}
 
 
+@router.get("/api/system/network", dependencies=[Depends(require_user)])
+async def network_status(state: AppState = Depends(get_app_state)) -> dict:
+    return state.network_service.wifi_status()
+
+
+@router.get("/api/system/info", dependencies=[Depends(require_user)])
+async def system_info() -> dict:
+    def command(args: list[str]) -> str:
+        try:
+            result = subprocess.run(args, check=False, capture_output=True, text=True, timeout=4)
+        except Exception:
+            return ""
+        return result.stdout.strip()
+
+    model = ""
+    try:
+        with open("/proc/device-tree/model", "r", encoding="utf-8") as model_file:
+            model = model_file.read().replace("\x00", "").strip()
+    except OSError:
+        model = ""
+
+    os_name = ""
+    try:
+        with open("/etc/os-release", "r", encoding="utf-8") as os_file:
+            for line in os_file:
+                if line.startswith("PRETTY_NAME="):
+                    os_name = line.partition("=")[2].strip().strip('"')
+                    break
+    except OSError:
+        os_name = ""
+
+    qt_version = command(["qmake6", "-query", "QT_VERSION"]) if shutil.which("qmake6") else ""
+    if not qt_version and shutil.which("qmake"):
+        qt_version = command(["qmake", "-query", "QT_VERSION"])
+
+    return {
+        "project": "Vokrr native Qt touchscreen kiosk",
+        "backend": "FastAPI 0.1.0",
+        "frontend": "Qt Quick/QML",
+        "raspberry_pi_model": model or "Unknown",
+        "os": os_name or platform.platform(),
+        "kernel": platform.release(),
+        "architecture": platform.machine(),
+        "python": platform.python_version(),
+        "qt": qt_version or "Unknown",
+    }
+
+
+@router.get(
+    "/api/spotify/auth-url",
+    response_model=SpotifyAuthUrlResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_auth_url(state: AppState = Depends(get_app_state)) -> SpotifyAuthUrlResponse:
+    if not state.spotify_service.configured:
+        return SpotifyAuthUrlResponse(
+            configured=False,
+            connected=False,
+            redirect_uri=state.settings.spotify_redirect_uri,
+            scopes=[],
+            detail="Spotify app credentials are not configured",
+        )
+    return SpotifyAuthUrlResponse(
+        configured=True,
+        connected=state.spotify_service.token_path.exists(),
+        auth_url=state.spotify_service.auth_url(),
+        redirect_uri=state.settings.spotify_redirect_uri,
+        scopes=SPOTIFY_SCOPES,
+    )
+
+
+@router.get("/api/spotify/callback", response_class=HTMLResponse)
+async def spotify_callback(
+    code: str | None = None,
+    state_param: str | None = Query(default=None, alias="state"),
+    error: str | None = None,
+    state: AppState = Depends(get_app_state),
+) -> HTMLResponse:
+    await state.spotify_service.handle_callback(code=code, state=state_param, error=error)
+    return HTMLResponse(
+        """
+        <!doctype html>
+        <html>
+          <head><title>Spotify connected</title></head>
+          <body style="background:#050505;color:#fff;font-family:system-ui;padding:32px">
+            <h1>Spotify connected</h1>
+            <p>You can close this tab and return to Vokrr.</p>
+          </body>
+        </html>
+        """
+    )
+
+
+@router.get(
+    "/api/spotify/playback",
+    response_model=SpotifyPlaybackResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_playback(state: AppState = Depends(get_app_state)) -> SpotifyPlaybackResponse:
+    return await state.spotify_service.playback()
+
+
+@router.post(
+    "/api/spotify/player/{action}",
+    response_model=SpotifyControlResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_control(
+    action: str,
+    state: AppState = Depends(get_app_state),
+) -> SpotifyControlResponse:
+    await state.spotify_service.control(action)
+    return SpotifyControlResponse(detail=f"Spotify {action} requested")
+
+
+@router.get("/api/spotify/devices", dependencies=[Depends(require_user)])
+async def spotify_devices(state: AppState = Depends(get_app_state)) -> dict:
+    return {"devices": await state.spotify_service.devices()}
+
+
+@router.post(
+    "/api/spotify/transfer/vokrr",
+    response_model=SpotifyControlResponse,
+    dependencies=[Depends(require_user)],
+)
+async def spotify_transfer_vokrr(state: AppState = Depends(get_app_state)) -> SpotifyControlResponse:
+    device = await state.spotify_service.transfer_to_device_named("Vokrr", play=True)
+    return SpotifyControlResponse(detail=f"Transferred playback to {device.get('name', 'Vokrr')}")
+
+
+@router.post("/api/system/network/{network_key}/connect", dependencies=[Depends(require_user)])
+async def network_connect(network_key: str, state: AppState = Depends(get_app_state)) -> dict:
+    try:
+        return state.network_service.connect_wifi(network_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
 @router.get("/api/ha/entities", dependencies=[Depends(require_user)])
 async def ha_entities(state: AppState = Depends(get_app_state)) -> list[dict]:
     try:
@@ -229,6 +378,7 @@ async def ha_entities(state: AppState = Depends(get_app_state)) -> list[dict]:
 
 @router.get("/api/rooms", response_model=list[Room], dependencies=[Depends(require_user)])
 async def rooms(state: AppState = Depends(get_app_state)) -> list[Room]:
+    await state.device_service.ensure_ha_device_metadata()
     await state.state_sync.reconcile_once(broadcast=False)
     return state.device_service.rooms()
 
@@ -288,6 +438,17 @@ async def set_room(
 async def devices(state: AppState = Depends(get_app_state)) -> list[Device]:
     await state.state_sync.reconcile_once(broadcast=False)
     return state.device_service.devices()
+
+
+@router.post("/api/devices/refresh", response_model=list[Room], dependencies=[Depends(require_user)])
+async def refresh_devices(state: AppState = Depends(get_app_state)) -> list[Room]:
+    await state.onboarding_service.import_discovered_devices()
+    rooms = await state.device_service.refresh_rooms()
+    await state.websocket_manager.broadcast(
+        "snapshot",
+        {"rooms": [room.model_dump() for room in rooms]},
+    )
+    return rooms
 
 
 @router.get("/api/devices/{device_id}", response_model=Device, dependencies=[Depends(require_user)])

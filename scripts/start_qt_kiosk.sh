@@ -11,7 +11,7 @@ if [ ! -x "${APP_BIN}" ]; then
   exit 1
 fi
 
-pkill -u "$USER" -f "vokrr-qt" 2>/dev/null || true
+pkill -u "$USER" -x "vokrr-qt" 2>/dev/null || true
 
 display_deadline=$(( $(date +%s) + DISPLAY_TIMEOUT ))
 while [ "$(date +%s)" -lt "$display_deadline" ]; do

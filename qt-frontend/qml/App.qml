@@ -1,17 +1,22 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtMultimedia
+import QtQuick.Shapes
+import QtQuick.Effects
 import QtWebSockets
+import "components" as VokrrComponents
+import "roomfinal" as RoomFinal
 
 ApplicationWindow {
     id: app
     visible: true
-    width: 800
+    width: 640
     height: 480
-    minimumWidth: 800
+    minimumWidth: 640
     minimumHeight: 480
     title: "Vokrr"
-    color: "#071014"
+    color: darkMode ? "#212121" : "#e8e8e8"
 
     property string apiBase: vokrrBackendApiBase || "http://localhost:8080"
     property string token: ""
@@ -28,6 +33,41 @@ ApplicationWindow {
     property var notifications: []
     property string loginError: ""
     property bool loading: true
+    property bool devicesRefreshing: false
+    property var networkStatus: null
+    property string networkError: ""
+    property bool startupLoaderVisible: true
+    property string settingsPanel: ""
+    property var systemInfo: ({})
+    property string toastMessage: ""
+    property bool toastVisible: false
+    property bool refreshInProgress: false
+    property bool darkMode: true
+    property var pendingAuthRetries: []
+    property bool spotifyPlaybackActive: true
+    property string spotifyTrackTitle: "Glow"
+    property string spotifyArtistName: "Echo"
+    property string spotifyAlbumName: ""
+    property string spotifyDeviceName: "Vokrr Home"
+    property string spotifyAlbumArtUrl: ""
+    property bool spotifyConfigured: false
+    property bool spotifyConnected: false
+    property bool spotifyNeedsAuth: true
+    property bool spotifyLoading: false
+    property real spotifyProgress: 0.36
+    property int spotifyDurationSeconds: 45
+    property var pendingDeviceToggles: ({})
+    property double lastDeviceToggleAt: 0
+    property string lastDeviceToggleId: ""
+    property bool realtimeConnected: false
+    property bool realtimeReconnectPending: false
+    property int realtimeReconnectDelay: 1000
+    property int realtimeReconnectMaxDelay: 15000
+    readonly property int appNavigatorWidth: 64
+    readonly property int appNavigatorHeight: 254
+    readonly property int appNavigatorLeftMargin: 8
+    readonly property int appContentGap: 12
+    readonly property int appContentLeftInset: appNavigatorLeftMargin + appNavigatorWidth + appContentGap
 
     readonly property var navItems: [
         { key: "Dashboard", label: "Dashboard", icon: "H" },
@@ -66,6 +106,47 @@ ApplicationWindow {
                 list.push(devices[j])
         }
         return list
+    }
+
+    function mergeRoomsSnapshot(nextRooms) {
+        var incomingRooms = nextRooms || []
+        var currentDevices = {}
+        for (var i = 0; i < rooms.length; i++) {
+            var roomDevices = rooms[i].devices || []
+            for (var j = 0; j < roomDevices.length; j++) {
+                var current = roomDevices[j]
+                if (current && current.id)
+                    currentDevices[current.id] = current
+            }
+        }
+
+        var mergedRooms = []
+        for (var roomIndex = 0; roomIndex < incomingRooms.length; roomIndex++) {
+            var room = JSON.parse(JSON.stringify(incomingRooms[roomIndex]))
+            var devices = room.devices || []
+            for (var deviceIndex = 0; deviceIndex < devices.length; deviceIndex++) {
+                var incoming = devices[deviceIndex]
+                var existing = incoming && incoming.id ? currentDevices[incoming.id] : null
+                if (existing && JSON.stringify(existing) === JSON.stringify(incoming))
+                    devices[deviceIndex] = existing
+            }
+            room.devices = devices
+            mergedRooms.push(room)
+        }
+
+        rooms = mergedRooms
+        if (!selectedRoomId && rooms.length)
+            selectedRoomId = rooms[0].id
+        if (selectedRoomId && !hasRoom(selectedRoomId) && rooms.length)
+            selectedRoomId = rooms[0].id
+    }
+
+    function hasRoom(roomId) {
+        for (var i = 0; i < rooms.length; i++) {
+            if (rooms[i].id === roomId)
+                return true
+        }
+        return false
     }
 
     function selectedRoom() {
@@ -114,7 +195,41 @@ ApplicationWindow {
         notifications = next.slice(0, 12)
     }
 
-    function http(method, path, body, callback, auth) {
+    function retryPendingAuthRequests(success) {
+        var pending = pendingAuthRetries
+        pendingAuthRetries = []
+        for (var i = 0; i < pending.length; i++)
+            pending[i](success)
+    }
+
+    function refreshSession(callback) {
+        if (!refreshToken) {
+            callback(false)
+            return
+        }
+
+        pendingAuthRetries.push(callback)
+        if (refreshInProgress)
+            return
+
+        refreshInProgress = true
+        http("POST", "/api/auth/refresh", { refresh_token: refreshToken }, function(status, data) {
+            refreshInProgress = false
+            if (status >= 200 && status < 300 && data && data.access_token) {
+                token = data.access_token || ""
+                refreshToken = data.refresh_token || ""
+                currentUser = data.user || currentUser
+                ws.active = false
+                ws.active = true
+                retryPendingAuthRequests(true)
+            } else {
+                logout()
+                retryPendingAuthRequests(false)
+            }
+        }, false, true)
+    }
+
+    function http(method, path, body, callback, auth, alreadyRetried) {
         var xhr = new XMLHttpRequest()
         xhr.open(method, apiBase + path)
         xhr.setRequestHeader("Content-Type", "application/json")
@@ -129,6 +244,15 @@ ApplicationWindow {
                     data = JSON.parse(xhr.responseText)
             } catch (e) {
                 data = null
+            }
+            if (auth !== false && xhr.status === 401 && refreshToken && !alreadyRetried) {
+                refreshSession(function(success) {
+                    if (success)
+                        http(method, path, body, callback, auth, true)
+                    else
+                        callback(xhr.status, data)
+                })
+                return
             }
             callback(xhr.status, data)
         }
@@ -154,6 +278,8 @@ ApplicationWindow {
         loginError = ""
         loadSnapshot()
         loadHealth()
+        loadNetworkStatus()
+        loadSpotifyStatus()
         ws.active = true
     }
 
@@ -184,9 +310,7 @@ ApplicationWindow {
             return
         http("GET", "/api/rooms", null, function(status, data) {
             if (status >= 200 && status < 300 && data) {
-                rooms = data
-                if (!selectedRoomId && rooms.length)
-                    selectedRoomId = rooms[0].id
+                mergeRoomsSnapshot(data)
             } else {
                 pushNotification("Could not load rooms", "error")
             }
@@ -197,11 +321,29 @@ ApplicationWindow {
         })
     }
 
+    function refreshDevicesFromHomeAssistant() {
+        if (!token || devicesRefreshing)
+            return
+        devicesRefreshing = true
+        http("POST", "/api/devices/refresh", null, function(status, data) {
+            if (status >= 200 && status < 300 && data) {
+                mergeRoomsSnapshot(data)
+                pushNotification("Devices refreshed", "info")
+            } else {
+                pushNotification("Could not refresh devices", "error")
+            }
+            devicesRefreshing = false
+        })
+    }
+
     function loadHealth() {
         http("GET", "/api/system/health", null, function(status, data) {
             if (status >= 200 && status < 300 && data) {
+                var wasOffline = healthError !== ""
                 health = data
                 healthError = ""
+                if (wasOffline && token)
+                    loadSnapshot()
             } else {
                 health = null
                 healthError = "Backend unavailable"
@@ -209,26 +351,254 @@ ApplicationWindow {
         }, false)
     }
 
+    function loadNetworkStatus() {
+        if (!token)
+            return
+        http("GET", "/api/system/network", null, function(status, data) {
+            if (status >= 200 && status < 300 && data) {
+                networkStatus = data
+                networkError = ""
+            } else {
+                networkError = "Could not load network status"
+            }
+        })
+    }
+
+    function loadSystemInfo() {
+        if (!token)
+            return
+        http("GET", "/api/system/info", null, function(status, data) {
+            if (status >= 200 && status < 300 && data)
+                systemInfo = data
+            else
+                showToast("Could not load system info")
+        })
+    }
+
+    function showToast(message) {
+        toastMessage = message
+        toastVisible = true
+        toastTimer.restart()
+    }
+
+    function spotifyAction(action) {
+        if (spotifyNeedsAuth || !spotifyConnected) {
+            openSpotifyLogin()
+            return
+        }
+        if (action === "playPause") {
+            var target = spotifyPlaybackActive ? "pause" : "play"
+            spotifyPlaybackActive = !spotifyPlaybackActive
+            http("POST", "/api/spotify/player/" + target, null, function(status) {
+                if (status >= 200 && status < 300)
+                    loadSpotifyStatus()
+                else {
+                    spotifyPlaybackActive = !spotifyPlaybackActive
+                    showToast("Spotify control failed")
+                }
+            })
+            return
+        }
+        if (action === "previous" || action === "next") {
+            http("POST", "/api/spotify/player/" + action, null, function(status) {
+                if (status >= 200 && status < 300)
+                    loadSpotifyStatus()
+                else
+                    showToast("Spotify control failed")
+            })
+            return
+        }
+        openSpotifyLogin()
+    }
+
+    function loadSpotifyStatus() {
+        if (!token || spotifyLoading)
+            return
+        spotifyLoading = true
+        http("GET", "/api/spotify/playback", null, function(status, data) {
+            spotifyLoading = false
+            if (status >= 200 && status < 300 && data) {
+                spotifyConfigured = data.configured || false
+                spotifyConnected = data.connected || false
+                spotifyNeedsAuth = data.needs_auth || false
+                spotifyPlaybackActive = data.is_playing || false
+                spotifyTrackTitle = data.title || (spotifyNeedsAuth ? "Connect Spotify" : "Spotify")
+                spotifyArtistName = data.artist || ""
+                spotifyAlbumName = data.album_name || ""
+                spotifyAlbumArtUrl = data.album_art_url || ""
+                spotifyDeviceName = data.device_name || "Spotify"
+                spotifyDurationSeconds = Math.max(1, Math.round((data.duration_ms || 45000) / 1000))
+                spotifyProgress = Math.max(0, Math.min(1, (data.progress_ms || 0) / Math.max(1, data.duration_ms || 45000)))
+            } else {
+                spotifyNeedsAuth = true
+                spotifyTrackTitle = "Connect Spotify"
+                spotifyArtistName = "Tap play to authorize"
+            }
+        })
+    }
+
+    function openSpotifyLogin() {
+        if (!token)
+            return
+        http("GET", "/api/spotify/auth-url", null, function(status, data) {
+            if (status >= 200 && status < 300 && data && data.auth_url) {
+                Qt.openUrlExternally(data.auth_url)
+                showToast("Complete Spotify login in the browser")
+            } else {
+                showToast("Spotify auth is not ready")
+            }
+        })
+    }
+
+    function spotifyTimeLabel(seconds) {
+        var value = Math.max(0, Math.floor(seconds))
+        var remainder = value % 60
+        return Math.floor(value / 60) + ":" + (remainder < 10 ? "0" : "") + remainder
+    }
+
+    function connectWifi(networkKey) {
+        if (!networkKey)
+            return
+        networkError = "Connecting..."
+        http("POST", "/api/system/network/" + encodeURIComponent(networkKey) + "/connect", null, function(status, data) {
+            if (status >= 200 && status < 300 && data) {
+                networkStatus = data
+                networkError = ""
+                loadHealth()
+                loadSnapshot()
+                showToast("Connected")
+            } else {
+                networkError = "Could not connect to Wi-Fi"
+                loadNetworkStatus()
+                showToast("Connection failed")
+            }
+        })
+    }
+
+    function openSettingsPanel(panelName) {
+        settingsPanel = panelName
+        if (panelName === "Network")
+            loadNetworkStatus()
+        if (panelName === "Information")
+            loadSystemInfo()
+    }
+
+    function restartRaspberryPi() {
+        http("POST", "/api/admin/system/restart", null, function(status, data) {
+            if (status >= 200 && status < 300) {
+                pushNotification("Raspberry Pi restart requested", "info")
+            } else {
+                pushNotification("Could not restart Raspberry Pi", "error")
+            }
+        })
+    }
+
     function mergeDevice(updated) {
+        if (!updated)
+            return false
         var nextRooms = JSON.parse(JSON.stringify(rooms))
+        var changed = false
         for (var i = 0; i < nextRooms.length; i++) {
             var devices = nextRooms[i].devices || []
             for (var j = 0; j < devices.length; j++) {
-                if (devices[j].id === updated.id)
+                var current = devices[j]
+                var sameDevice = current.id === updated.id
+                var sameEntity = updated.entity_id && current.entity_id === updated.entity_id
+                if ((sameDevice || sameEntity) && JSON.stringify(current) !== JSON.stringify(updated)) {
                     devices[j] = updated
+                    changed = true
+                }
             }
         }
-        rooms = nextRooms
+        if (changed)
+            rooms = nextRooms
+        return changed
+    }
+
+    function mergeDeviceList(updatedDevices) {
+        if (!updatedDevices || !updatedDevices.length)
+            return
+        for (var i = 0; i < updatedDevices.length; i++)
+            mergeDevice(updatedDevices[i])
+    }
+
+    function pollDeviceStates() {
+        if (!token)
+            return
+        http("GET", "/api/devices", null, function(status, data) {
+            if (status >= 200 && status < 300 && data)
+                mergeDeviceList(data)
+        })
+    }
+
+    function reconnectRealtime() {
+        if (!token || realtimeReconnectPending || ws.status === WebSocket.Open || ws.status === WebSocket.Connecting)
+            return
+        realtimeReconnectPending = true
+        realtimeReconnectTimer.interval = realtimeReconnectDelay
+        realtimeReconnectTimer.restart()
+    }
+
+    function restartRealtime() {
+        realtimeReconnectPending = false
+        if (!token || ws.status === WebSocket.Open || ws.status === WebSocket.Connecting)
+            return
+        ws.active = false
+        ws.active = true
+    }
+
+    function handleRealtimeStatus(status) {
+        realtimeConnected = status === WebSocket.Open
+        if (status === WebSocket.Open) {
+            realtimeReconnectPending = false
+            realtimeReconnectDelay = 1000
+            pollDeviceStates()
+            return
+        }
+        if (!token)
+            return
+        if (status === WebSocket.Error || status === WebSocket.Closed) {
+            if (status === WebSocket.Error)
+                pushNotification("Realtime feed disconnected", "warn")
+            reconnectRealtime()
+            realtimeReconnectDelay = Math.min(realtimeReconnectDelay * 2, realtimeReconnectMaxDelay)
+        }
+    }
+
+    function optimisticToggleDevice(device) {
+        if (!device || !device.state)
+            return null
+
+        var updated = JSON.parse(JSON.stringify(device))
+        updated.state.is_on = !device.state.is_on
+        updated.state.state = updated.state.is_on ? "on" : "off"
+        mergeDevice(updated)
+        return updated
     }
 
     function toggleDevice(device) {
         if (!device)
             return
+        var now = Date.now()
+        if (pendingDeviceToggles[device.id])
+            return
+        if (lastDeviceToggleAt > 0 && now - lastDeviceToggleAt < 650 && lastDeviceToggleId !== device.id) {
+            console.log("Ignoring overlapping device toggle", device.id, device.name)
+            return
+        }
+        pendingDeviceToggles[device.id] = true
+        lastDeviceToggleAt = now
+        lastDeviceToggleId = device.id
+        console.log("Toggling device", device.id, device.name)
+        var optimistic = optimisticToggleDevice(device)
         http("POST", "/api/devices/" + encodeURIComponent(device.id) + "/toggle", null, function(status, data) {
+            delete pendingDeviceToggles[device.id]
             if (status >= 200 && status < 300 && data) {
                 mergeDevice(data)
                 pushNotification(device.name + " updated", "info")
             } else {
+                if (optimistic)
+                    mergeDevice(device)
                 pushNotification("Device action failed", "error")
             }
         })
@@ -253,7 +623,6 @@ ApplicationWindow {
         http("POST", "/api/scenes/" + encodeURIComponent(scene.id) + "/run", null, function(status) {
             if (status >= 200 && status < 300) {
                 pushNotification(scene.name + " ran", "info")
-                loadSnapshot()
             } else {
                 pushNotification("Could not run " + scene.name, "error")
             }
@@ -273,14 +642,58 @@ ApplicationWindow {
         running: token.length > 0
         repeat: true
         interval: 5000
-        onTriggered: loadHealth()
+        onTriggered: {
+            loadHealth()
+            loadNetworkStatus()
+        }
+    }
+
+    Timer {
+        running: token.length === 0 && !loading
+        repeat: true
+        interval: 5000
+        onTriggered: kioskLogin()
+    }
+
+    Timer {
+        running: true
+        repeat: false
+        interval: 5000
+        onTriggered: startupLoaderVisible = false
+    }
+
+    Timer {
+        id: toastTimer
+        interval: 2600
+        repeat: false
+        onTriggered: toastVisible = false
+    }
+
+    Timer {
+        running: spotifyPlaybackActive && token.length > 0
+        repeat: true
+        interval: 1000
+        onTriggered: spotifyProgress = spotifyProgress >= 1 ? 0 : Math.min(1, spotifyProgress + (1 / spotifyDurationSeconds))
     }
 
     Timer {
         running: token.length > 0
         repeat: true
-        interval: 3000
-        onTriggered: loadSnapshot()
+        interval: 5000
+        onTriggered: loadSpotifyStatus()
+    }
+
+    Timer {
+        running: token.length > 0 && activeView === "Dashboard" && !realtimeConnected
+        repeat: true
+        interval: 7000
+        onTriggered: pollDeviceStates()
+    }
+
+    Timer {
+        id: realtimeReconnectTimer
+        repeat: false
+        onTriggered: restartRealtime()
     }
 
     WebSocket {
@@ -290,9 +703,7 @@ ApplicationWindow {
         onTextMessageReceived: function(message) {
             var event = JSON.parse(message)
             if (event.event === "snapshot") {
-                rooms = event.payload.rooms || []
-                if (!selectedRoomId && rooms.length)
-                    selectedRoomId = rooms[0].id
+                mergeRoomsSnapshot(event.payload.rooms || [])
             } else if (event.event === "device.updated") {
                 mergeDevice(event.payload)
             } else if (event.event === "voice.command") {
@@ -306,34 +717,279 @@ ApplicationWindow {
             }
         }
         onStatusChanged: function(status) {
-            if (token && status === WebSocket.Error)
-                pushNotification("Realtime feed disconnected", "warn")
+            handleRealtimeStatus(status)
         }
     }
 
-    Rectangle {
+    GradientBackground {
         anchors.fill: parent
-        gradient: Gradient {
-            GradientStop { position: 0; color: "#071014" }
-            GradientStop { position: 0.48; color: "#0d2524" }
-            GradientStop { position: 1; color: "#15151f" }
-        }
-    }
+        opacity: startupLoaderVisible ? 0 : 1
 
-    Rectangle {
-        anchors.fill: parent
-        opacity: 0.5
-        gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop { position: 0; color: "#1f6f5b" }
-            GradientStop { position: 0.45; color: "transparent" }
-            GradientStop { position: 1; color: "#673f82" }
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
         }
     }
 
     Loader {
         anchors.fill: parent
+        active: false
         sourceComponent: token ? shellComponent : loginComponent
+        opacity: startupLoaderVisible ? 0 : 1
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    Loader {
+        anchors.fill: parent
+        active: token.length > 0 && activeView === "Dashboard"
+        visible: active
+        sourceComponent: roomDashboardComponent
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 4
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    Loader {
+        id: devicesRadarLoader
+
+        property var scannerDevices: allDevices()
+        property var scannerRooms: rooms
+        property bool scannerRefreshing: devicesRefreshing
+
+        anchors.fill: parent
+        anchors.leftMargin: appContentLeftInset
+        active: activeView === "Devices"
+        visible: active
+        source: Qt.resolvedUrl("RadarDemoContent.qml")
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 5
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+
+        onLoaded: {
+            item.setRooms(scannerRooms)
+            item.darkMode = app.darkMode
+            item.navInset = appContentLeftInset
+            item.refreshing = scannerRefreshing
+            item.deviceClicked.connect(function(device) { toggleDevice(device) })
+            item.deviceSetRequested.connect(function(device, payload) { setDevice(device, payload) })
+            item.refreshRequested.connect(function() { refreshDevicesFromHomeAssistant() })
+        }
+        Connections {
+            target: app
+            function onDarkModeChanged() {
+                if (devicesRadarLoader.item)
+                    devicesRadarLoader.item.darkMode = app.darkMode
+            }
+        }
+        onScannerRoomsChanged: {
+            if (item)
+                item.setRooms(scannerRooms)
+        }
+        onScannerDevicesChanged: {
+            if (item)
+                item.setDevices(scannerDevices)
+        }
+        onScannerRefreshingChanged: {
+            if (item)
+                item.refreshing = scannerRefreshing
+        }
+    }
+
+    Loader {
+        anchors.fill: parent
+        anchors.leftMargin: appContentLeftInset
+        active: activeView === "Settings"
+        visible: active
+        sourceComponent: settingsView
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 5
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    RoomFinal.ThemeToggle {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 16
+        anchors.topMargin: 16
+        width: 76
+        height: 26
+        theme: null
+        checked: !app.darkMode
+        visible: token.length > 0 && activeView !== "Dashboard" && !startupLoaderVisible
+        z: 12
+        onToggled: app.darkMode = !app.darkMode
+    }
+
+    BottomToolbar {
+        anchors.left: parent.left
+        anchors.leftMargin: appNavigatorLeftMargin
+        anchors.verticalCenter: parent.verticalCenter
+        width: appNavigatorWidth
+        height: appNavigatorHeight
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 10
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    SpotifyPlayerWidget {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 16
+        anchors.topMargin: 16
+        width: Math.min(320, parent.width - appContentLeftInset - 32)
+        height: 190
+        visible: false
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 9
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    CameraFeedPanel {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: appContentLeftInset
+        anchors.topMargin: 16
+        width: Math.min(320, (parent.width - appContentLeftInset - 32) * 0.5)
+        height: Math.min(240, parent.height * 0.5, width * 0.75)
+        visible: false
+        opacity: startupLoaderVisible ? 0 : 1
+        z: 8
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: darkMode ? "#212121" : "#e8e8e8"
+        opacity: startupLoaderVisible ? 1 : 0
+        visible: opacity > 0
+        z: 100
+
+        Loader {
+            anchors.centerIn: parent
+            source: Qt.resolvedUrl("components/app_loader.qml")
+
+            onLoaded: {
+                item.size = 200
+                item.loaderColor = "#A0373B"
+                item.trackColor = "#71717a"
+                item.duration = 2000
+                item.running = Qt.binding(function() { return startupLoaderVisible })
+            }
+        }
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 650
+                easing.type: Easing.InOutQuad
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: toastVisible ? 18 : -height - 12
+        width: Math.min(parent.width - 40, Math.max(220, toastText.implicitWidth + 40))
+        height: 42
+        radius: 8
+        color: "#f1fffc"
+        border.color: "#4FA593"
+        opacity: toastVisible ? 1 : 0
+        z: 120
+
+        Text {
+            id: toastText
+            anchors.centerIn: parent
+            text: toastMessage
+            color: "#0f1716"
+            font.pixelSize: 13
+            font.bold: true
+            elide: Text.ElideRight
+            width: parent.width - 28
+            horizontalAlignment: Text.AlignHCenter
+        }
+
+        Behavior on y {
+            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 180; easing.type: Easing.OutQuad }
+        }
+    }
+
+    Component {
+        id: roomDashboardComponent
+
+        RoomFinal.RoomDashboard {
+            rooms: app.rooms
+            mediaConnected: spotifyConnected && !spotifyNeedsAuth
+            mediaPlaying: spotifyPlaybackActive
+            mediaTitle: spotifyTrackTitle
+            mediaArtist: spotifyArtistName
+            mediaAlbum: spotifyAlbumName
+            mediaArtUrl: spotifyAlbumArtUrl
+            darkMode: app.darkMode
+            onRoomSelected: function(roomId) {
+                if (roomId)
+                    selectedRoomId = roomId
+            }
+            onDeviceActionRequested: function(device) {
+                if (device && device.state)
+                    toggleDevice(device)
+                else
+                    showToast("No action available")
+            }
+            onMediaActionRequested: function(action) {
+                spotifyAction(action)
+            }
+            onThemeModeRequested: function(nextDarkMode) {
+                app.darkMode = nextDarkMode
+            }
+        }
     }
 
     Component {
@@ -584,19 +1240,239 @@ ApplicationWindow {
     Component {
         id: settingsView
         Rectangle {
-            radius: 8
-            color: "#bb102025"
-            border.color: "#315c65"
-            ColumnLayout {
+            color: app.darkMode ? "#212121" : "#e8e8e8"
+
+            Loader {
                 anchors.fill: parent
-                anchors.margins: 18
-                spacing: 12
-                Text { text: "Settings"; color: "white"; font.pixelSize: 28; font.bold: true }
-                Text { text: "Backend: " + apiBase; color: "#b8cbc8"; font.pixelSize: 16 }
-                Text { text: "User: " + (currentUser ? currentUser.username : "Kiosk"); color: "#b8cbc8"; font.pixelSize: 16 }
-                Button { text: "Refresh snapshot"; onClicked: { loadSnapshot(); loadHealth() } }
-                Button { text: "Sign out"; onClicked: logout() }
-                Item { Layout.fillHeight: true }
+                sourceComponent: settingsPanel === "" ? settingsHomeView : settingsPlaceholderView
+            }
+        }
+    }
+
+    Component {
+        id: settingsHomeView
+        Loader {
+            anchors.fill: parent
+            source: Qt.resolvedUrl("components/CPU_animation_bg.qml")
+
+            onLoaded: {
+                item.centerText = "VOKRR"
+                item.animateText = true
+                item.animateLines = true
+                item.animateMarkers = true
+                item.showCpuConnections = true
+                item.navigationRequested.connect(function(panelName) { openSettingsPanel(panelName) })
+                item.restartRequested.connect(function() { restartRaspberryPi() })
+            }
+        }
+    }
+
+    Component {
+        id: settingsPlaceholderView
+        Rectangle {
+            color: app.darkMode ? "#212121" : "#e8e8e8"
+
+            VokrrComponents.Button {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.leftMargin: 18 - appContentLeftInset
+                anchors.topMargin: 18
+                variant: "ghost"
+                darkMode: app.darkMode
+                onClicked: settingsPanel = ""
+
+                contentItem: Component {
+                    Image {
+                        width: 24
+                        height: 24
+                        source: app.darkMode ? "qrc:/assets/icons/back.svg" : "qrc:/assets/icons/back-black.svg"
+                        fillMode: Image.PreserveAspectFit
+                        mipmap: true
+                        smooth: true
+                    }
+                }
+            }
+
+            ColumnLayout {
+                width: Math.min(parent.width - 120, 520)
+                anchors.top: parent.top
+                anchors.topMargin: 76
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 18
+
+                Text {
+                    Layout.fillWidth: true
+                    text: settingsPanel
+                    color: app.darkMode ? "#e8e8e8" : "#212121"
+                    font.pixelSize: 28
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+                    visible: settingsPanel === "Network"
+
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: 10
+
+                        Canvas {
+                            Layout.preferredWidth: 24
+                            Layout.preferredHeight: 24
+
+                            onPaint: {
+                                var ctx = getContext("2d")
+                                ctx.clearRect(0, 0, width, height)
+                                ctx.strokeStyle = "#4FA593"
+                                ctx.lineWidth = 2
+                                ctx.lineCap = "round"
+                                ctx.lineJoin = "round"
+
+                                if (networkStatus && networkStatus.connection_type === "ethernet") {
+                                    ctx.strokeRect(6, 7, 12, 10)
+                                    ctx.beginPath()
+                                    ctx.moveTo(9, 17); ctx.lineTo(9, 20)
+                                    ctx.moveTo(15, 17); ctx.lineTo(15, 20)
+                                    ctx.moveTo(9, 4); ctx.lineTo(15, 4); ctx.lineTo(15, 7)
+                                    ctx.stroke()
+                                } else {
+                                    ctx.beginPath()
+                                    ctx.arc(12, 18, 1.5, 0, Math.PI * 2)
+                                    ctx.stroke()
+                                    ctx.beginPath()
+                                    ctx.arc(12, 18, 6, Math.PI * 1.18, Math.PI * 1.82)
+                                    ctx.stroke()
+                                    ctx.beginPath()
+                                    ctx.arc(12, 18, 11, Math.PI * 1.12, Math.PI * 1.88)
+                                    ctx.stroke()
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: networkStatus && networkStatus.connection_type === "ethernet"
+                                  ? (networkStatus.ethernet || "RJ45")
+                                  : (networkStatus && networkStatus.ssid ? networkStatus.ssid : "Not connected")
+                            color: app.darkMode ? "#e8e8e8" : "#212121"
+                            font.pixelSize: 16
+                            font.bold: true
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: 360
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Available networks"
+                        color: app.darkMode ? "#94a3b8" : "#64748b"
+                        font.pixelSize: 12
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    Repeater {
+                        model: networkStatus && networkStatus.configured ? networkStatus.configured : []
+
+                        VokrrComponents.Button {
+                            Layout.alignment: Qt.AlignHCenter
+                            width: 320
+                            height: 50
+                            variant: "ghost"
+                            darkMode: app.darkMode
+                            onClicked: connectWifi(modelData.key)
+
+                            contentItem: Component {
+                                Text {
+                                    width: 280
+                                    text: modelData.ssid
+                                    color: app.darkMode ? "#e8e8e8" : "#212121"
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    visible: settingsPanel === "Profile"
+
+                    SettingsInfoRow {
+                        label: "Username"
+                        value: currentUser ? currentUser.username : "Kiosk"
+                    }
+                    SettingsInfoRow {
+                        label: "Role"
+                        value: currentUser && currentUser.is_admin ? "Admin" : "Local console"
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: settingsPanel === "Information"
+
+                    Repeater {
+                        model: [
+                            { label: "Project", value: systemInfo.project || "Vokrr" },
+                            { label: "Raspberry Pi", value: systemInfo.raspberry_pi_model || "Unknown" },
+                            { label: "OS", value: systemInfo.os || "Unknown" },
+                            { label: "Kernel", value: systemInfo.kernel || "Unknown" },
+                            { label: "Architecture", value: systemInfo.architecture || "Unknown" },
+                            { label: "Frontend", value: systemInfo.frontend || "Qt Quick/QML" },
+                            { label: "Qt", value: systemInfo.qt || "Unknown" },
+                            { label: "Backend", value: systemInfo.backend || "FastAPI" },
+                            { label: "Python", value: systemInfo.python || "Unknown" }
+                        ]
+
+                        SettingsInfoRow {
+                            label: modelData.label
+                            value: modelData.value
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    component SettingsInfoRow: Rectangle {
+        property string label: ""
+        property string value: ""
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: 42
+        radius: 8
+        color: app.darkMode ? "#0b1010" : "#f4f4f4"
+        border.color: app.darkMode ? "#18302d" : "#d1d5db"
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 14
+            anchors.rightMargin: 14
+            spacing: 12
+
+            Text {
+                text: label
+                color: app.darkMode ? "#94a3b8" : "#64748b"
+                font.pixelSize: 12
+                font.bold: true
+                Layout.preferredWidth: 130
+                elide: Text.ElideRight
+            }
+
+            Text {
+                text: value
+                color: app.darkMode ? "#e8e8e8" : "#212121"
+                font.pixelSize: 13
+                Layout.fillWidth: true
+                elide: Text.ElideRight
             }
         }
     }
@@ -613,6 +1489,125 @@ ApplicationWindow {
             anchors.centerIn: parent
             Text { text: value; color: "white"; font.pixelSize: 34; font.bold: true; Layout.alignment: Qt.AlignHCenter }
             Text { text: label; color: "#b8cbc8"; font.pixelSize: 14; Layout.alignment: Qt.AlignHCenter }
+        }
+    }
+
+    component CameraFeedPanel: VokrrComponents.Card {
+        id: cameraPanel
+
+        cornerRadius: 30
+        contentPadding: 8
+        darkMode: app.darkMode
+
+        property var selectedFormat: null
+        readonly property real feedRadius: Math.max(0, cornerRadius - contentPadding)
+
+        function bestFormat(device) {
+            if (!device || !device.videoFormats || device.videoFormats.length === 0)
+                return null
+
+            var best = null
+            var bestScore = -1000000
+            for (var i = 0; i < device.videoFormats.length; i++) {
+                var format = device.videoFormats[i]
+                if (!format || !format.resolution)
+                    continue
+
+                var width = format.resolution.width
+                var height = format.resolution.height
+                var fps = format.maxFrameRate || 0
+                var pixels = width * height
+                var score = -Math.abs(pixels - 307200) / 1000 + fps * 10
+
+                if (width === 640 && height === 480)
+                    score += 10000
+                if (fps >= 30)
+                    score += 500
+
+                if (score > bestScore) {
+                    bestScore = score
+                    best = format
+                }
+            }
+            return best
+        }
+
+        function refreshFormat() {
+            selectedFormat = bestFormat(camera.cameraDevice)
+        }
+
+        MediaDevices {
+            id: mediaDevices
+            onVideoInputsChanged: cameraPanel.refreshFormat()
+        }
+
+        CaptureSession {
+            camera: Camera {
+                id: camera
+                active: cameraPanel.visible && mediaDevices.videoInputs.length > 0
+                cameraDevice: mediaDevices.defaultVideoInput
+                cameraFormat: cameraPanel.selectedFormat
+
+                Component.onCompleted: cameraPanel.refreshFormat()
+                onCameraDeviceChanged: cameraPanel.refreshFormat()
+            }
+
+            videoOutput: videoOutput
+        }
+
+        Rectangle {
+            id: cameraMask
+
+            anchors.fill: parent
+            radius: cameraPanel.feedRadius
+            color: "#050809"
+            visible: false
+            layer.enabled: true
+        }
+
+        Item {
+            anchors.fill: parent
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                maskEnabled: true
+                maskSource: cameraMask
+            }
+
+            VideoOutput {
+                anchors.fill: parent
+                id: videoOutput
+                fillMode: VideoOutput.PreserveAspectCrop
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: 8
+                width: 44
+                height: 20
+                radius: 10
+                color: "#d81f35"
+                visible: camera.active
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "LIVE"
+                    color: "white"
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 28
+                visible: mediaDevices.videoInputs.length === 0
+                text: "No camera"
+                color: "#b8cbc8"
+                font.pixelSize: 13
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+            }
         }
     }
 
@@ -699,6 +1694,436 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+
+    component BottomToolbar: VokrrComponents.Card {
+        id: rootItem
+
+        readonly property var toolbarItems: [
+            { key: "Dashboard", icon: "dashboard" },
+            { key: "Devices", icon: "devices" },
+            { key: "Settings", icon: "settings" }
+        ]
+        readonly property int itemCount: toolbarItems.length
+        readonly property real gap: 8
+        readonly property real itemHeight: (toolbarItemsArea.height - gap * (itemCount - 1)) / itemCount
+
+        cornerRadius: 30
+        contentPadding: 8
+        darkMode: app.darkMode
+
+        function activeIndex() {
+            for (var i = 0; i < toolbarItems.length; i++) {
+                if (toolbarItems[i].key === activeView)
+                    return i
+            }
+            return 0
+        }
+
+        Item {
+            id: contentArea
+
+            objectName: "#mainToolbar"
+            anchors.fill: parent
+
+            Rectangle {
+                id: activeIndicator
+
+                width: parent.width
+                height: rootItem.itemHeight
+                y: (rootItem.itemHeight + rootItem.gap) * rootItem.activeIndex()
+                radius: 24
+                color: app.darkMode ? "#1f09090b" : "#18212121"
+                border.color: app.darkMode ? "#16ffffff" : "#16212121"
+                border.width: 1
+
+                Behavior on y {
+                    NumberAnimation {
+                        duration: 200
+                        easing.type: Easing.InOutQuad
+                    }
+                }
+            }
+
+            Column {
+                id: toolbarItemsArea
+
+                anchors.fill: parent
+                spacing: rootItem.gap
+                clip: true
+
+                Repeater {
+                    model: rootItem.toolbarItems
+
+                    ToolbarTab {
+                        width: toolbarItemsArea.width
+                        height: rootItem.itemHeight
+                        iconName: modelData.icon
+                        selected: activeView === modelData.key
+                        onClicked: activeView = modelData.key
+                    }
+                }
+            }
+        }
+    }
+
+    component ToolbarTab: Item {
+        id: toolbarTab
+
+        property string iconName: ""
+        property bool selected: false
+        signal clicked()
+
+        function iconPath() {
+            return "qrc:/assets/icons/" + (app.darkMode ? "tab-white/" : "tab-black/") + "tab-" + iconName + (selected ? "-active" : "") + ".svg"
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: parent.width
+            height: parent.height
+            radius: 999
+            color: pressArea.pressed ? (app.darkMode ? "#14ffffff" : "#14212121") : "transparent"
+        }
+
+        Image {
+            id: toolbarIconSource
+            anchors.centerIn: parent
+            width: 24
+            height: 24
+            source: toolbarTab.iconPath()
+            fillMode: Image.PreserveAspectFit
+            mipmap: true
+            smooth: true
+        }
+
+        MouseArea {
+            id: pressArea
+            anchors.fill: parent
+            onClicked: toolbarTab.clicked()
+        }
+    }
+
+    component SpotifyPlayerWidget: VokrrComponents.Card {
+        id: spotifyWidget
+
+        cornerRadius: 30
+        darkMode: app.darkMode
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 18
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 64
+                spacing: 12
+
+                Rectangle {
+                    Layout.preferredWidth: 64
+                    Layout.preferredHeight: 64
+                    radius: 16
+                    clip: true
+
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: "#ff9a9e" }
+                        GradientStop { position: 1; color: "#fad0c4" }
+                    }
+
+                    Image {
+                        anchors.fill: parent
+                        source: spotifyAlbumArtUrl
+                        visible: spotifyAlbumArtUrl.length > 0
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        smooth: true
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: spotifyTrackTitle
+                        color: "#ffffff"
+                        font.pixelSize: 21
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: spotifyNeedsAuth ? "Tap play to connect" : spotifyArtistName
+                        color: "#d1d1d6"
+                        font.pixelSize: 14
+                        elide: Text.ElideRight
+                    }
+                }
+
+                RowLayout {
+                    Layout.preferredWidth: 38
+                    Layout.preferredHeight: 32
+                    Layout.alignment: Qt.AlignBottom
+                    spacing: 2
+
+                    Repeater {
+                        model: 8
+
+                        Rectangle {
+                            property real barHeight: 6 + ((index % 4) * 4)
+
+                            Layout.preferredWidth: 3
+                            Layout.preferredHeight: barHeight
+                            Layout.alignment: Qt.AlignBottom
+                            radius: 2
+
+                            gradient: Gradient {
+                                orientation: Gradient.Vertical
+                                GradientStop { position: 0; color: "#00c6ff" }
+                                GradientStop { position: 1; color: "#0072ff" }
+                            }
+
+                            SequentialAnimation on barHeight {
+                                running: spotifyPlaybackActive
+                                loops: Animation.Infinite
+                                PauseAnimation { duration: index * 100 }
+                                NumberAnimation { to: 26; duration: 400; easing.type: Easing.InOutQuad }
+                                NumberAnimation { to: 6; duration: 400; easing.type: Easing.InOutQuad }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Text {
+                        text: spotifyTimeLabel(spotifyProgress * spotifyDurationSeconds)
+                        color: "#8e8e93"
+                        font.pixelSize: 12
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Text {
+                        text: spotifyTimeLabel((1 - spotifyProgress) * spotifyDurationSeconds)
+                        color: "#8e8e93"
+                        font.pixelSize: 12
+                    }
+                }
+
+                Rectangle {
+                    id: musicProgressTrack
+
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 4
+                    radius: 2
+                    color: "#1affffff"
+                    clip: false
+
+                    Rectangle {
+                        width: parent.width * spotifyProgress
+                        height: parent.height
+                        radius: parent.radius
+
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0; color: "#00c6ff" }
+                            GradientStop { position: 1; color: "#0072ff" }
+                        }
+                    }
+
+                    Rectangle {
+                        x: Math.max(0, Math.min(parent.width - width, parent.width * spotifyProgress - width / 2))
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 10
+                        height: 10
+                        radius: 5
+                        color: "#ffffff"
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 54
+                    spacing: 12
+
+                    Item { Layout.fillWidth: true }
+
+                    MusicIconButton {
+                        iconName: "previous"
+                        onClicked: spotifyAction("previous")
+                    }
+
+                    MusicIconButton {
+                        iconName: spotifyPlaybackActive ? "pause" : "play"
+                        onClicked: spotifyAction("playPause")
+                    }
+
+                    MusicIconButton {
+                        iconName: "next"
+                        onClicked: spotifyAction("next")
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    MusicIconButton {
+                        iconName: "radar"
+                        onClicked: spotifyAction("device")
+                    }
+                }
+            }
+        }
+    }
+
+    component MusicIconButton: Rectangle {
+        id: musicButton
+
+        property string iconName: "play"
+        property bool highlighted: false
+        signal clicked()
+
+        onIconNameChanged: iconCanvas.requestPaint()
+        onHighlightedChanged: iconCanvas.requestPaint()
+
+        Layout.preferredWidth: 52
+        Layout.preferredHeight: 52
+        radius: 26
+        color: musicPressArea.pressed ? "#1affffff" : "transparent"
+        border.width: 0
+
+        Canvas {
+            id: iconCanvas
+
+            anchors.centerIn: parent
+            width: musicButton.iconName === "play" || musicButton.iconName === "pause" ? 30 : 22
+            height: width
+            antialiasing: true
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = app.darkMode ? "#e8e8e8" : "#212121"
+                ctx.strokeStyle = ctx.fillStyle
+                ctx.lineWidth = Math.max(2, width * 0.1)
+                ctx.lineCap = "round"
+                ctx.lineJoin = "round"
+
+                if (musicButton.iconName === "play") {
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.3, height * 0.2)
+                    ctx.lineTo(width * 0.78, height * 0.5)
+                    ctx.lineTo(width * 0.3, height * 0.8)
+                    ctx.closePath()
+                    ctx.fill()
+                } else if (musicButton.iconName === "pause") {
+                    ctx.fillRect(width * 0.28, height * 0.22, width * 0.17, height * 0.56)
+                    ctx.fillRect(width * 0.56, height * 0.22, width * 0.17, height * 0.56)
+                } else if (musicButton.iconName === "previous") {
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.92, height * 0.18)
+                    ctx.lineTo(width * 0.44, height * 0.5)
+                    ctx.lineTo(width * 0.92, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.5, height * 0.18)
+                    ctx.lineTo(width * 0.08, height * 0.5)
+                    ctx.lineTo(width * 0.5, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.05, height * 0.2)
+                    ctx.lineTo(width * 0.05, height * 0.8)
+                    ctx.stroke()
+                } else if (musicButton.iconName === "next") {
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.08, height * 0.18)
+                    ctx.lineTo(width * 0.56, height * 0.5)
+                    ctx.lineTo(width * 0.08, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.5, height * 0.18)
+                    ctx.lineTo(width * 0.92, height * 0.5)
+                    ctx.lineTo(width * 0.5, height * 0.82)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.95, height * 0.2)
+                    ctx.lineTo(width * 0.95, height * 0.8)
+                    ctx.stroke()
+                } else {
+                    ctx.fillStyle = "transparent"
+                    ctx.beginPath()
+                    ctx.arc(width * 0.5, height * 0.5, width * 0.42, Math.PI * 1.2, Math.PI * 1.92)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(width * 0.5, height * 0.5, width * 0.27, Math.PI * 1.2, Math.PI * 1.92)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(width * 0.5, height * 0.5, width * 0.1, 0, Math.PI * 2)
+                    ctx.stroke()
+                }
+            }
+        }
+
+        MouseArea {
+            id: musicPressArea
+            anchors.fill: parent
+            onClicked: musicButton.clicked()
+        }
+    }
+
+    component GradientBackground: Item {
+        Rectangle {
+            anchors.fill: parent
+            color: app.darkMode ? "#212121" : "#e8e8e8"
+        }
+
+        Canvas {
+            anchors.fill: parent
+            antialiasing: true
+            visible: false
+
+            onPaint: {
+                var ctx = getContext("2d")
+                var w = width
+                var h = height
+                if (w <= 0 || h <= 0)
+                    return
+
+                var cx = w * 0.5
+                var cy = h * -0.5
+                var rx = w * 1.25
+                var ry = h * 1.25
+                var scaleY = ry / rx
+
+                ctx.clearRect(0, 0, w, h)
+                ctx.save()
+                ctx.translate(cx, cy)
+                ctx.scale(1, scaleY)
+
+                var gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, rx)
+                gradient.addColorStop(0, "rgba(99, 102, 241, 0.21)")
+                gradient.addColorStop(0.4, "rgba(99, 102, 241, 0.21)")
+                gradient.addColorStop(1, "rgba(99, 102, 241, 0)")
+
+                ctx.fillStyle = gradient
+                ctx.fillRect(-cx, -cy / scaleY, w, h / scaleY)
+                ctx.restore()
+            }
+
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
         }
     }
 }

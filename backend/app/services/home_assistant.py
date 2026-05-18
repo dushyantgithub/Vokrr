@@ -83,6 +83,36 @@ class HomeAssistantClient:
 
     async def entity_registry_for_display(self) -> list[dict[str, Any]]:
         result = await self.websocket_command("config/entity_registry/list_for_display")
+        if isinstance(result, list):
+            return result
+        if not isinstance(result, dict):
+            return []
+
+        rows = result.get("entities", [])
+        if not isinstance(rows, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            normalized.append(
+                {
+                    **row,
+                    "entity_id": row.get("entity_id") or row.get("ei"),
+                    "device_id": row.get("device_id") or row.get("di"),
+                    "platform": row.get("platform") or row.get("pl"),
+                    "name": row.get("name") or row.get("en"),
+                }
+            )
+        return normalized
+
+    async def area_registry(self) -> list[dict[str, Any]]:
+        result = await self.websocket_command("config/area_registry/list")
+        return result if isinstance(result, list) else []
+
+    async def device_registry(self) -> list[dict[str, Any]]:
+        result = await self.websocket_command("config/device_registry/list")
         return result if isinstance(result, list) else []
 
     async def subscribe_state_changed(self) -> AsyncIterator[dict[str, Any]]:
@@ -104,16 +134,17 @@ class HomeAssistantClient:
                     if auth_ok.get("type") != "auth_ok":
                         raise HomeAssistantError(f"Home Assistant WebSocket auth failed: {auth_ok}")
 
-                    await websocket.send(
-                        json.dumps(
-                            {
-                                "id": message_id,
-                                "type": "subscribe_events",
-                                "event_type": "state_changed",
-                            }
+                    for event_type in ("state_changed", "entity_registry_updated"):
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "id": message_id,
+                                    "type": "subscribe_events",
+                                    "event_type": event_type,
+                                }
+                            )
                         )
-                    )
-                    message_id += 1
+                        message_id += 1
 
                     while True:
                         message = json.loads(await websocket.recv())

@@ -20,7 +20,7 @@ from app.domain.models import (
     OnboardingSnapshotResponse,
 )
 from app.services.home_assistant import HomeAssistantClient
-from app.services.registry import DeviceRegistry, normalize_state
+from app.services.registry import DeviceRegistry, is_excluded_entity, normalize_state
 
 
 def _utcnow() -> str:
@@ -35,11 +35,61 @@ def _titleize(value: str) -> str:
     return value.replace("_", " ").replace("-", " ").strip().title() or "Room"
 
 
+def _row_area_id(row: dict[str, Any]) -> str | None:
+    area_id = row.get("area_id") or row.get("areaId") or row.get("ai")
+    return str(area_id) if area_id else None
+
+
+def _row_device_id(row: dict[str, Any]) -> str | None:
+    device_id = row.get("device_id") or row.get("deviceId") or row.get("di")
+    return str(device_id) if device_id else None
+
+
+def _guess_room_id(entity_id: str, friendly_name: str, rooms: list[OnboardingRoomOption]) -> str | None:
+    text = f"{friendly_name} {entity_id}".lower().replace("_", " ")
+    for room in rooms:
+        room_name = room.name.lower()
+        room_id_text = room.id.lower().replace("_", " ")
+        if text.startswith(room_name) or text.startswith(room_id_text):
+            return room.id
+    return None
+
+
+def _raw_entity_name(entity_id: str, row: dict[str, Any], attributes: dict[str, Any]) -> str:
+    return str(
+        attributes.get("friendly_name")
+        or row.get("name")
+        or row.get("en")
+        or row.get("original_name")
+        or row.get("on")
+        or entity_id.split(".", 1)[-1].replace("_", " ").title()
+    ).strip()
+
+
+def _display_name(
+    entity_id: str,
+    row: dict[str, Any],
+    attributes: dict[str, Any],
+    area_name: str | None = None,
+) -> str:
+    name = _raw_entity_name(entity_id, row, attributes)
+    if area_name and name.casefold() == area_name.casefold():
+        name = entity_id.split(".", 1)[-1].replace("_", " ").title()
+    if area_name and name.casefold().startswith(f"{area_name.casefold()} "):
+        stripped = name[len(area_name) :].strip()
+        if stripped:
+            name = stripped
+    return name or entity_id.split(".", 1)[-1].replace("_", " ").title()
+
+
 def infer_device_type(entity_id: str, attributes: dict[str, Any]) -> DeviceType:
     domain = entity_id.split(".", 1)[0]
+    friendly_name = str(attributes.get("friendly_name") or "").casefold()
     if domain == "light":
         return DeviceType.light
     if domain in {"switch", "input_boolean"}:
+        if "fan" in friendly_name:
+            return DeviceType.fan
         return DeviceType.switch
     if domain in {"fan", "climate"}:
         return DeviceType.fan
@@ -154,26 +204,14 @@ class OnboardingRepository:
         self, ha_device_id: str | None, primary_entity_id: str
     ) -> ImportedDeviceRecord | None:
         with self._connect() as connection:
-            row = None
-            if ha_device_id:
-                row = connection.execute(
-                    """
-                    SELECT * FROM imported_devices
-                    WHERE ha_device_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                    """,
-                    (ha_device_id,),
-                ).fetchone()
-            if row is None:
-                row = connection.execute(
-                    """
-                    SELECT * FROM imported_devices
-                    WHERE primary_entity_id = ?
-                    LIMIT 1
-                    """,
-                    (primary_entity_id,),
-                ).fetchone()
+            row = connection.execute(
+                """
+                SELECT * FROM imported_devices
+                WHERE primary_entity_id = ?
+                LIMIT 1
+                """,
+                (primary_entity_id,),
+            ).fetchone()
         if row is None:
             return None
         return ImportedDeviceRecord(
@@ -244,6 +282,21 @@ class OnboardingRepository:
             raise RuntimeError("Failed to persist imported device")
         return saved
 
+    def delete_imported_devices(self, primary_entity_ids: list[str]) -> int:
+        if not primary_entity_ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in primary_entity_ids)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                DELETE FROM imported_devices
+                WHERE primary_entity_id IN ({placeholders})
+                """,
+                tuple(primary_entity_ids),
+            )
+            return cursor.rowcount
+
 
 class OnboardingService:
     def __init__(
@@ -301,10 +354,42 @@ class OnboardingService:
     async def snapshot(self) -> OnboardingSnapshotResponse:
         states = await self.ha_client.states()
         registry_rows = await self.ha_client.entity_registry_for_display()
+        area_names, device_area_ids = await self._ha_area_context()
 
         state_by_entity_id = {row["entity_id"]: row for row in states if "entity_id" in row}
         imported = self.repository.list_imported_devices()
         imported_entity_ids = {entity_id: row for row in imported for entity_id in row.entity_ids}
+        rooms = [
+            OnboardingRoomOption(id=room.id, name=room.name, icon=room.icon)
+            for room in self.registry.all_rooms()
+        ]
+        known_room_ids = {room.id for room in rooms}
+        for area_id, area_name in area_names.items():
+            if area_id not in known_room_ids:
+                rooms.append(OnboardingRoomOption(id=area_id, name=area_name, icon="room"))
+                known_room_ids.add(area_id)
+
+        if not registry_rows:
+            registry_rows = []
+            for state_row in states:
+                entity_id = str(state_row.get("entity_id", ""))
+                attributes = state_row.get("attributes", {})
+                friendly_name = str(
+                    attributes.get("friendly_name")
+                    or entity_id.split(".", 1)[-1].replace("_", " ").title()
+                )
+                if is_excluded_entity(entity_id, friendly_name, attributes):
+                    continue
+                domain = entity_id.split(".", 1)[0]
+                if domain not in {"switch", "light", "fan", "climate", "media_player", "cover"}:
+                    continue
+                registry_rows.append(
+                    {
+                        "entity_id": entity_id,
+                        "name": friendly_name,
+                        "area_id": _guess_room_id(entity_id, friendly_name, rooms),
+                    }
+                )
 
         grouped: dict[str, dict[str, Any]] = {}
         for row in registry_rows:
@@ -315,12 +400,21 @@ class OnboardingService:
             if state_row is None:
                 continue
             attributes = state_row.get("attributes", {})
+            if is_excluded_entity(
+                entity_id,
+                str(row.get("name") or row.get("en") or attributes.get("friendly_name") or ""),
+                attributes,
+                row,
+            ):
+                continue
             domain = entity_id.split(".", 1)[0]
             if domain in {"automation", "script", "zone", "person", "sun"}:
                 continue
 
-            ha_device_id = row.get("device_id") or row.get("deviceId")
-            group_key = str(ha_device_id or entity_id)
+            ha_device_id = _row_device_id(row)
+            area_id = (device_area_ids.get(ha_device_id) if ha_device_id else None) or _row_area_id(row)
+            area_name = area_names.get(area_id) if area_id else None
+            group_key = entity_id
             candidate = grouped.setdefault(
                 group_key,
                 {
@@ -328,16 +422,12 @@ class OnboardingService:
                     "entity_id": entity_id,
                     "entity_ids": [],
                     "ha_device_id": ha_device_id,
-                    "name": str(
-                        row.get("name")
-                        or attributes.get("friendly_name")
-                        or entity_id.split(".", 1)[1].replace("_", " ").title()
-                    ),
+                    "name": _display_name(entity_id, row, attributes, area_name),
                     "domain": domain,
                     "platform": row.get("platform") or row.get("pl"),
-                    "area_id": row.get("area_id") or row.get("areaId"),
+                    "area_id": area_id,
                     "room_id": None,
-                    "room_name": None,
+                    "room_name": area_name,
                     "type": infer_device_type(entity_id, attributes),
                     "capabilities": infer_capabilities(entity_id, attributes),
                     "state": normalize_state(str(state_row.get("state", "unknown")), attributes),
@@ -346,6 +436,18 @@ class OnboardingService:
                 },
             )
             candidate["entity_ids"].append(entity_id)
+            entity_capabilities = infer_capabilities(entity_id, attributes)
+            merged_capabilities = list(candidate["capabilities"])
+            for capability in entity_capabilities:
+                if capability not in merged_capabilities:
+                    merged_capabilities.append(capability)
+            candidate["capabilities"] = merged_capabilities
+
+            if not candidate["area_id"]:
+                candidate["area_id"] = area_id
+            if candidate["area_id"] and not candidate["room_name"]:
+                candidate["room_name"] = area_names.get(candidate["area_id"])
+
             existing = imported_entity_ids.get(entity_id)
             if existing is not None:
                 candidate["already_imported"] = True
@@ -354,10 +456,6 @@ class OnboardingService:
                 room = self.registry.get_room(existing.room_id)
                 candidate["room_name"] = room.name if room else _titleize(existing.room_id)
 
-        rooms = [
-            OnboardingRoomOption(id=room.id, name=room.name, icon=room.icon)
-            for room in self.registry.all_rooms()
-        ]
         candidates = [OnboardingCandidate(**value) for value in grouped.values()]
         candidates.sort(key=lambda item: (item.already_imported, item.name.lower()))
         return OnboardingSnapshotResponse(
@@ -367,13 +465,171 @@ class OnboardingService:
             home_assistant_url=self.ha_client.base_url,
         )
 
+    async def _ha_area_context(self) -> tuple[dict[str, str], dict[str, str]]:
+        area_names: dict[str, str] = {}
+        device_area_ids: dict[str, str] = {}
+
+        try:
+            for area in await self.ha_client.area_registry():
+                area_id = str(area.get("area_id") or area.get("id") or "")
+                if not area_id:
+                    continue
+                area_names[area_id] = str(area.get("name") or _titleize(area_id))
+        except Exception:
+            area_names = {}
+
+        try:
+            for device in await self.ha_client.device_registry():
+                device_id = str(device.get("id") or device.get("device_id") or "")
+                area_id = _row_area_id(device)
+                if device_id and area_id:
+                    device_area_ids[device_id] = area_id
+                    area_names.setdefault(area_id, _titleize(area_id))
+        except Exception:
+            device_area_ids = {}
+
+        return area_names, device_area_ids
+
+    async def sync_imported_device_rooms(self) -> list[Device]:
+        registry_rows = await self.ha_client.entity_registry_for_display()
+        states = await self.ha_client.states()
+        area_names, device_area_ids = await self._ha_area_context()
+        row_by_entity_id = {
+            str(row.get("entity_id") or row.get("entityId") or row.get("entity") or ""): row
+            for row in registry_rows
+        }
+        state_by_entity_id = {row["entity_id"]: row for row in states if "entity_id" in row}
+        changed_device_ids: list[str] = []
+        stale_entity_ids: list[str] = []
+
+        for imported in self.repository.list_imported_devices():
+            row = row_by_entity_id.get(imported.primary_entity_id)
+            state_row = state_by_entity_id.get(imported.primary_entity_id)
+            if not row and not state_row:
+                stale_entity_ids.append(imported.primary_entity_id)
+                continue
+            row = row or {}
+            attributes = state_row.get("attributes", {}) if state_row else {}
+            ha_device_id = _row_device_id(row) or imported.ha_device_id
+            area_id = (device_area_ids.get(ha_device_id) if ha_device_id else None) or _row_area_id(row)
+            area_name = area_names.get(area_id) if area_id else None
+            room_id = area_id or imported.room_id
+            display_name = _display_name(imported.primary_entity_id, row, attributes, area_name)
+            device_type = infer_device_type(imported.primary_entity_id, attributes).value
+            capabilities = [capability.value for capability in infer_capabilities(imported.primary_entity_id, attributes)]
+            if not capabilities:
+                capabilities = imported.capabilities
+
+            if (
+                room_id == imported.room_id
+                and display_name == imported.display_name
+                and device_type == imported.device_type
+                and capabilities == imported.capabilities
+                and ha_device_id == imported.ha_device_id
+            ):
+                continue
+
+            saved = self.repository.save_imported_device(
+                ha_device_id=ha_device_id,
+                primary_entity_id=imported.primary_entity_id,
+                entity_ids=imported.entity_ids,
+                room_id=room_id,
+                display_name=display_name,
+                device_type=device_type,
+                capabilities=capabilities,
+                is_visible=imported.is_visible,
+                is_favorite=imported.is_favorite,
+            )
+            changed_device_ids.append(saved.id)
+
+        if stale_entity_ids:
+            self.repository.delete_imported_devices(stale_entity_ids)
+
+        if changed_device_ids or stale_entity_ids:
+            self.registry.load()
+        return [
+            device
+            for device_id in changed_device_ids
+            if (device := self.registry.get_device(device_id)) is not None
+        ]
+
+    async def repair_grouped_imports(self) -> list[Device]:
+        imported = self.repository.list_imported_devices()
+        grouped_imports = [record for record in imported if len(record.entity_ids) > 1]
+        if not grouped_imports:
+            return []
+
+        states = await self.ha_client.states()
+        registry_rows = await self.ha_client.entity_registry_for_display()
+        area_names, device_area_ids = await self._ha_area_context()
+        state_by_entity_id = {row["entity_id"]: row for row in states if "entity_id" in row}
+        row_by_entity_id = {
+            str(row.get("entity_id") or row.get("entityId") or row.get("entity") or ""): row
+            for row in registry_rows
+        }
+
+        changed_device_ids: list[str] = []
+        for record in grouped_imports:
+            for entity_id in record.entity_ids:
+                state_row = state_by_entity_id.get(entity_id)
+                if not state_row:
+                    continue
+
+                attributes = state_row.get("attributes", {})
+                row = row_by_entity_id.get(entity_id, {})
+                name = _display_name(entity_id, row, attributes)
+                if is_excluded_entity(entity_id, name, attributes, row):
+                    if entity_id == record.primary_entity_id:
+                        saved = self.repository.save_imported_device(
+                            ha_device_id=record.ha_device_id,
+                            primary_entity_id=record.primary_entity_id,
+                            entity_ids=[record.primary_entity_id],
+                            room_id=record.room_id,
+                            display_name=record.display_name,
+                            device_type=record.device_type,
+                            capabilities=record.capabilities,
+                            is_visible=record.is_visible,
+                            is_favorite=record.is_favorite,
+                        )
+                        changed_device_ids.append(saved.id)
+                    continue
+
+                capabilities = infer_capabilities(entity_id, attributes)
+                if Capability.toggle not in capabilities:
+                    continue
+
+                ha_device_id = _row_device_id(row) or record.ha_device_id
+                area_id = (device_area_ids.get(ha_device_id) if ha_device_id else None) or _row_area_id(row)
+                area_name = area_names.get(area_id) if area_id else None
+                room_id = area_id or record.room_id
+                saved = self.repository.save_imported_device(
+                    ha_device_id=ha_device_id,
+                    primary_entity_id=entity_id,
+                    entity_ids=[entity_id],
+                    room_id=room_id,
+                    display_name=_display_name(entity_id, row, attributes, area_name),
+                    device_type=infer_device_type(entity_id, attributes).value,
+                    capabilities=[capability.value for capability in capabilities],
+                    is_visible=record.is_visible,
+                    is_favorite=record.is_favorite,
+                )
+                changed_device_ids.append(saved.id)
+
+        if changed_device_ids:
+            self.registry.load()
+        return [
+            device
+            for device_id in changed_device_ids
+            if (device := self.registry.get_device(device_id)) is not None
+        ]
+
     async def import_candidate(self, request: DeviceImportRequest) -> Device:
         snapshot = await self.snapshot()
         candidate = next((item for item in snapshot.candidates if item.id == request.candidate_id), None)
         if candidate is None:
             raise HTTPException(status_code=404, detail="Discovery candidate not found")
-        room = self.registry.get_room(request.room_id)
-        if room is None:
+        room_ids = {room.id for room in snapshot.rooms}
+        if request.room_id not in room_ids:
             raise HTTPException(status_code=400, detail="Selected room does not exist")
 
         display_name = request.display_name.strip() if request.display_name else candidate.name
@@ -397,3 +653,37 @@ class OnboardingService:
             raise RuntimeError("Imported device was not loaded into the registry")
         return device
 
+    async def import_discovered_devices(self) -> list[Device]:
+        changed_devices = await self.sync_imported_device_rooms()
+        repaired_devices = await self.repair_grouped_imports()
+        snapshot = await self.snapshot()
+        fallback_room_id = snapshot.rooms[0].id if snapshot.rooms else "home_assistant"
+        imported_device_ids: list[str] = []
+
+        for candidate in snapshot.candidates:
+            if candidate.already_imported:
+                continue
+            if Capability.toggle not in candidate.capabilities:
+                continue
+
+            room_id = candidate.area_id or candidate.room_id or fallback_room_id
+            saved = self.repository.save_imported_device(
+                ha_device_id=candidate.ha_device_id,
+                primary_entity_id=candidate.entity_id,
+                entity_ids=candidate.entity_ids,
+                room_id=room_id,
+                display_name=candidate.name,
+                device_type=candidate.type.value,
+                capabilities=[capability.value for capability in candidate.capabilities],
+                is_visible=True,
+                is_favorite=False,
+            )
+            imported_device_ids.append(saved.id)
+
+        self.registry.load()
+        imported_devices = [
+            device
+            for device_id in imported_device_ids
+            if (device := self.registry.get_device(device_id)) is not None
+        ]
+        return [*changed_devices, *repaired_devices, *imported_devices]

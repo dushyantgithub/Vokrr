@@ -305,11 +305,18 @@ def fuzzy_action_match(normalized: str) -> CommandMatch | None:
         ("toggle", "toggle"),
         ("change", "toggle"),
     ]
+    best_prefix: tuple[float, int, str] | None = None
     for phrase, action in prefix_actions:
         phrase_len = len(phrase.split())
         prefix = " ".join(words[:phrase_len])
-        if _similarity(prefix, phrase) >= FUZZY_MATCH_THRESHOLD and len(words) > phrase_len:
-            return CommandMatch(action=action, target=" ".join(words[phrase_len:]).strip())
+        score = _similarity(prefix, phrase)
+        if score >= FUZZY_MATCH_THRESHOLD and len(words) > phrase_len:
+            if best_prefix is None or score > best_prefix[0]:
+                best_prefix = (score, phrase_len, action)
+
+    if best_prefix is not None:
+        _score, phrase_len, action = best_prefix
+        return CommandMatch(action=action, target=" ".join(words[phrase_len:]).strip())
 
     if len(words) >= 3 and _similarity(words[0], "switch") >= FUZZY_MATCH_THRESHOLD:
         suffix = words[-1]

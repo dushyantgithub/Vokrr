@@ -1,14 +1,15 @@
 [Unit]
 Description=Vokrr Docker stack
 Requires=docker.service
-After=docker.service network-online.target
-Wants=network-online.target
+After=docker.service vokrr-wifi.service network-online.target
+Wants=vokrr-wifi.service network-online.target
 
 [Service]
 Type=oneshot
 User=dushyant
 WorkingDirectory=/home/dushyant/apps/Vokrr
 RemainAfterExit=yes
+ExecStartPre=/home/dushyant/apps/Vokrr/scripts/select_audio_output.sh
 ExecStart=/usr/bin/docker compose -f /home/dushyant/apps/Vokrr/infra/docker-compose.yml --profile cloudflare up -d --build --remove-orphans
 ExecStop=/usr/bin/docker compose -f /home/dushyant/apps/Vokrr/infra/docker-compose.yml --profile cloudflare down
 
