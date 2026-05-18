@@ -29,7 +29,7 @@ ApplicationWindow {
     property string activeView: "Dashboard"
     property string selectedRoomId: ""
     property string assistantStatus: "idle"
-    property string assistantMessage: "Say Jarvis to start"
+    property string assistantMessage: "waiting for wake-word"
     property var notifications: []
     property string loginError: ""
     property bool loading: true
@@ -77,13 +77,22 @@ ApplicationWindow {
         { key: "Settings", label: "Settings", icon: "S" }
     ]
     readonly property var statusLabels: ({
-        idle: "Waiting for Jarvis",
+        idle: "waiting for wake-word",
         listening: "Listening",
+        recording: "Listening",
+        conversation_open: "Listening",
         processing: "Processing",
         done: "Ready",
         error: "Error",
         command_error: "Command failed"
     })
+    readonly property bool voicePipelineActive: assistantStatus !== "idle"
+        && assistantStatus !== "done"
+        && assistantStatus !== "error"
+        && assistantStatus !== "command_error"
+    readonly property string voicePipelineLabel: voicePipelineActive
+        ? "waiting for command"
+        : "waiting for wake-word"
 
     function hasCapability(device, capability) {
         return device && device.capabilities && device.capabilities.indexOf(capability) !== -1
@@ -276,6 +285,7 @@ ApplicationWindow {
         refreshToken = data.refresh_token || ""
         currentUser = data.user || null
         loginError = ""
+        refreshDevicesFromHomeAssistant()
         loadSnapshot()
         loadHealth()
         loadNetworkStatus()
@@ -973,6 +983,8 @@ ApplicationWindow {
             mediaAlbum: spotifyAlbumName
             mediaArtUrl: spotifyAlbumArtUrl
             darkMode: app.darkMode
+            voicePipelineActive: app.voicePipelineActive
+            voiceStatusText: app.voicePipelineLabel
             onRoomSelected: function(roomId) {
                 if (roomId)
                     selectedRoomId = roomId

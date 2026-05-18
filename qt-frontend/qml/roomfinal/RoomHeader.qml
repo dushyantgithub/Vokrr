@@ -10,12 +10,16 @@ Item {
     property int deviceCount: 0
     property string timeText: ""
     property string dateText: ""
+    property bool voicePipelineActive: false
+    property string voiceStatusText: voicePipelineActive ? "waiting for command" : "waiting for wake-word"
     signal roomSelected(int index)
     signal themeRequested()
 
     height: 56
-    readonly property int toggleWidth: 76
-    readonly property int timeWidth: 144
+    readonly property int toggleWidth: 68
+    readonly property int timeWidth: 126
+    readonly property int voiceWidth: Math.max(112, Math.min(170, width - root.toggleWidth - root.timeWidth - 210 - root.headerGap * 3))
+    readonly property int roomWidth: Math.max(190, Math.min(260, width - root.toggleWidth - root.timeWidth - root.voiceWidth - root.headerGap * 3))
     readonly property int headerGap: theme ? theme.space4 : 8
 
     function roomName() {
@@ -34,7 +38,7 @@ Item {
     GlassPanel {
         x: 0
         y: 4
-        width: Math.max(210, Math.min(300, parent.width - root.timeWidth - root.toggleWidth - root.headerGap * 2))
+        width: root.roomWidth
         height: 48
         theme: root.theme
         radius: theme.radiusMd
@@ -112,6 +116,44 @@ Item {
                 var delta = mouse.x - startX
                 if (Math.abs(delta) > 28)
                     root.move(delta < 0 ? 1 : -1)
+            }
+        }
+    }
+
+    GlassPanel {
+        x: root.roomWidth + root.headerGap
+        y: 4
+        width: root.voiceWidth
+        height: 48
+        theme: root.theme
+        radius: theme.radiusMd
+        padding: theme.space2
+        active: root.voicePipelineActive
+
+        Row {
+            anchors.centerIn: parent
+            width: parent.width - 14
+            height: parent.height
+            spacing: 7
+
+            Rectangle {
+                width: 10
+                height: 10
+                radius: 5
+                y: (parent.height - height) / 2
+                color: root.voicePipelineActive ? "#35d477" : "#e34c4c"
+            }
+
+            Text {
+                width: parent.width - 17
+                y: (parent.height - height) / 2
+                text: root.voiceStatusText
+                color: theme.textPrimary
+                font.family: theme.family()
+                font.pixelSize: 10
+                font.bold: true
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignLeft
             }
         }
     }

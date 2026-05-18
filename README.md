@@ -1,101 +1,128 @@
 # Vokrr
 
-Local-first smart home control system for Raspberry Pi 4/5 with Home Assistant as the integration engine, a custom FastAPI backend, a native Qt/QML touchscreen console, and a local voice command pipeline.
+Vokrr is a local-first smart home console for a Raspberry Pi. It combines Home Assistant for device integration, a FastAPI backend for authentication and orchestration, a native Qt/QML touchscreen UI, Spotify playback controls, and a wake-word voice pipeline using Porcupine, faster-whisper, NVIDIA Llama, and NVIDIA Magpie TTS.
 
-## Current Build
+The current target device is a Raspberry Pi 4B with the official 7-inch DSI touchscreen running a fullscreen kiosk.
 
-The repository contains a working end-to-end stack:
+## What Vokrr Does
 
-- **Docker Compose stack** for Home Assistant, backend, and voice services.
-- **FastAPI backend** with Home Assistant REST/WebSocket client, normalized rooms/devices, device actions, scenes/routines, health checks, and a realtime WebSocket hub for native clients.
-- **Qt/QML touchscreen console** optimized for the official 7-inch Raspberry Pi DSI touch display at 800x480, featuring:
-  - Native Qt Quick rendering instead of a browser shell.
-  - Dashboard, device grid, routines, activity, news, and settings views.
-  - Local kiosk auto-login through `POST /api/auth/kiosk`.
-  - Live REST + WebSocket updates from the backend.
-  - A `Jarvis` status bar showing idle/listening/processing/STT transcript states.
-- **Voice intent service** with YAML‑driven templates (`home-assistant/config/commands.yaml`), room/device name matching (including space‑folded fuzzy matching for STT outputs like "tube light" vs. "Tubelight"), and a `navigate` action that tells the UI which view to switch to.
-- **Config‑driven room/device mapping** in `home-assistant/config/devices.yaml`.
-- **Kiosk and deployment docs** for the Raspberry Pi.
+- Shows rooms, devices, scenes, media, camera preview, network/system status, and voice status on a native touchscreen UI.
+- Controls Home Assistant entities through a Vokrr backend instead of calling Home Assistant directly from clients.
+- Imports discovered Home Assistant entities into a local device registry.
+- Keeps device states fresh through Home Assistant REST/WebSocket updates and periodic reconciliation.
+- Supports local kiosk login plus username/password app login with JWT access tokens and refresh tokens.
+- Provides voice control with wake word `Jarvis`, local STT, NVIDIA LLM classification, Home Assistant service calls, and Magpie TTS replies.
+- Provides Spotify OAuth/playback controls and a Spotify Connect container named `Vokrr`.
+- Supports optional Cloudflare Tunnel exposure for the backend only.
 
-## Quick Start On The Pi
+## Current Architecture
 
-```bash
-cd ~/Projects/vokrr
-cp .env.example .env
+```mermaid
+flowchart LR
+    Touch[Qt/QML touchscreen kiosk] -->|REST + WebSocket| Backend[FastAPI backend]
+    IOS[iOS client project] -->|REST + WebSocket| Backend
+    Voice[voice-listener container] -->|voice events + fallback commands| Backend
+    Voice -->|REST service calls| HA[Home Assistant]
+    Voice -->|LLM/TTS APIs| NVIDIA[NVIDIA hosted APIs]
+    Backend -->|REST + WebSocket| HA
+    Backend -->|OAuth + playback API| Spotify[Spotify Web API]
+    HA --> Devices[Smart home devices]
 ```
 
-Edit `.env` and set:
+More detail lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-- `HOME_ASSISTANT_TOKEN` after creating a long-lived access token in Home Assistant.
-- `APP_BOOTSTRAP_ADMIN_USERNAME`, `APP_BOOTSTRAP_ADMIN_PASSWORD`, and `APP_AUTH_SECRET` for the initial Vokrr admin account.
+## Supported Platforms
 
-Keep `HOME_ASSISTANT_URL=http://localhost:8123` for the Docker Compose stack because the backend runs on host networking.
+| Component | Supported target |
+| --- | --- |
+| Production host | Raspberry Pi 4B / 8GB |
+| OS | Raspberry Pi OS 64-bit with desktop/lightdm for kiosk |
+| Display | Official Raspberry Pi 7-inch DSI touchscreen, 800x480 |
+| Backend and services | Docker Compose with host networking |
+| UI | Native Qt 6 Quick/QML |
+| Development | Linux/macOS for backend docs/tests; Raspberry Pi or Linux with Qt 6 for kiosk |
+| iOS client | Generated Xcode project under `ios/Vokrr` |
 
-Start the stack:
+## Screenshots
+
+No committed screenshots are currently present. Add production screenshots under `docs/assets/screenshots/` and update this section during handoff.
+
+Suggested captures:
+
+- Home dashboard at 800x480
+- Device detail/control screen
+- Voice status pill in idle and active states
+- Settings/onboarding screen
+
+## Quick Start
+
+```bash
+git clone <repo-url> Vokrr
+cd Vokrr
+cp .env.example .env
+cp .env.example scripts/.env
+```
+
+Edit `.env` and `scripts/.env`:
+
+- Set `HOME_ASSISTANT_TOKEN`.
+- Set `APP_BOOTSTRAP_ADMIN_USERNAME`, `APP_BOOTSTRAP_ADMIN_PASSWORD`, and `APP_AUTH_SECRET`.
+- Set `PORCUPINE_API_KEY` if voice is enabled.
+- Set `NVIDIA_API_KEY` or `NVIDIA_BUILD_API_KEY` if the NVIDIA voice pipeline is enabled.
+
+Start the service stack:
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d --build
 ```
 
-Open:
-
-- Home Assistant: `http://vokrr.local:8123`
-- Backend API docs: `http://vokrr.local:8080/docs`
-
-Use the Vokrr bootstrap admin credentials from `.env` to sign in initially. Home Assistant credentials are only for Home Assistant administration and integration setup. Kiosk hosts (`localhost`, `127.0.0.1`, `::1`) auto-login via `POST /api/auth/kiosk`.
-
-Build the native Qt console:
+Build the native kiosk:
 
 ```bash
 cmake -S qt-frontend -B qt-frontend/build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build qt-frontend/build
 ```
 
-To make the stack and kiosk come back automatically after a Raspberry Pi reboot, install and enable the bundled systemd units:
+Run the kiosk manually:
+
+```bash
+VOKRR_QT_WINDOWED=1 VOKRR_API_BASE=http://localhost:8080 qt-frontend/build/vokrr-qt
+```
+
+Open service URLs:
+
+- Backend API docs: `http://localhost:8080/docs`
+- Backend health: `http://localhost:8080/api/system/health`
+- Home Assistant: `http://localhost:8123`
+- Voice listener health: `http://localhost:8091/health`
+
+## Full Installation
+
+Use the complete guide for a clean Raspberry Pi build:
+
+- [docs/INSTALLATION.md](docs/INSTALLATION.md)
+- [docs/HARDWARE.md](docs/HARDWARE.md)
+- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)
+
+Short production setup:
 
 ```bash
 sudo PI_USER=$USER ./scripts/phase0_setup.sh
-sudo cp infra/systemd/vokrr-stack.service /etc/systemd/system/
-sudo cp infra/systemd/vokrr-kiosk.service /etc/systemd/system/
-sudo systemctl daemon-reload
+sudo reboot
+```
+
+After reboot:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build
+cmake -S qt-frontend -B qt-frontend/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build qt-frontend/build
+sudo ./scripts/install_wifi_service.sh
 sudo systemctl enable --now vokrr-stack.service
 sudo systemctl enable --now vokrr-kiosk.service
 ```
 
-The setup script removes the old Waveshare HDMI 1024×600 timing overrides and sets the official DSI panel to `800x480@60`. Reboot after running it so Raspberry Pi firmware and KMS pick up the display change.
-
-## Remote Access
-
-The recommended remote-access path is Cloudflare Tunnel, not direct router exposure. This is especially important on CGNAT-backed ISPs where port forwarding cannot work reliably.
-
-- Public API hostname: `https://api.vokrr.com`
-- Tunnel runtime: Docker Compose `cloudflared` service under the `cloudflare` profile
-- Setup guide: [docs/deployment/cloudflare-tunnel.md](./docs/deployment/cloudflare-tunnel.md)
-
-The iOS app and any future external clients should use only the backend hostname. Do not expose Home Assistant directly.
-
-## Native Console Architecture
-
-The touchscreen console lives in `qt-frontend/`:
-
-- `src/main.cpp` hosts the QML scene in a fullscreen Qt Quick window.
-- `qml/App.qml` talks directly to the backend REST endpoints and `/ws` WebSocket.
-- `scripts/start_qt_kiosk.sh` waits for the backend and display session, then launches `qt-frontend/build/vokrr-qt`.
-- `infra/systemd/vokrr-kiosk.service` starts the native console after LightDM and the Docker backend stack.
-
-## Voice Commands
-
-Templates are declared in `home-assistant/config/commands.yaml` under `intents.*.templates`. Examples:
-
-- `turn on {target}` / `turn off {target}` / `toggle {target}` (device or room).
-- `set {target} to {percent} percent` (brightness / percentage-capable devices).
-- `make {target} warm` / `white` / `cool` (color-capable lights).
-- `show me latest news`, `show the news`, `open news`, `go to news`, `latest news`, `news` → triggers a `navigate` action with `view: News`, and the Qt console switches tabs.
-
-Matching is case-insensitive, strips punctuation and filler prefixes (`"hey"`, `"okay"`, `"jarvis"`, `"please"`, `"could you"`, etc.), and falls back to space-folded comparison so STT outputs like `"tube light"` still match the registry name `"Tubelight"`.
-
-Each voice command pushes a `voice.command` event over the backend WebSocket; the Qt console uses it to drive the Jarvis status bar, push notifications for `command_error` / `error`, and switch views when the response contains a `navigate` field.
+The current systemd units contain absolute paths for `/home/dushyant/apps/Vokrr`. If installing under a different path or user, update the unit files first.
 
 ## Development
 
@@ -106,10 +133,10 @@ cd backend
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8080
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
-Run tests:
+Tests:
 
 ```bash
 cd backend
@@ -117,57 +144,111 @@ cd backend
 python -m pytest
 ```
 
-Qt/QML console:
+Qt/QML:
 
 ```bash
 cmake -S qt-frontend -B qt-frontend/build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build qt-frontend/build
-VOKRR_QT_WINDOWED=1 qt-frontend/build/vokrr-qt
+VOKRR_QT_WINDOWED=1 VOKRR_API_BASE=http://localhost:8080 qt-frontend/build/vokrr-qt
 ```
 
-## Device Mapping
-
-Home Assistant discovers the real entities. Vokrr maps those entity IDs to stable rooms/devices in `home-assistant/config/devices.yaml`.
-
-Use the backend discovery endpoint after Home Assistant is configured:
+Voice pipeline CLI test:
 
 ```bash
-curl http://vokrr.local:8080/api/ha/entities
+docker compose run --rm --no-deps voice-listener \
+  python -m services.voice_pipeline --text "turn on bedroom lights" --no-speak
 ```
 
-Then replace the example entity IDs in `home-assistant/config/devices.yaml`.
+## Production / Kiosk Mode
 
-## Backend API Surface
+Production uses:
 
-All endpoints sit under `/api/` on port 8080. Authenticated ones require a Bearer access token from `/api/auth/login`, `/api/auth/refresh`, or `/api/auth/kiosk`.
+- `vokrr-wifi.service` to configure primary/secondary Wi-Fi through NetworkManager.
+- `vokrr-stack.service` to start Docker Compose with the Cloudflare profile.
+- `vokrr-kiosk.service` to launch the Qt kiosk after the graphical session and backend are available.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/api/auth/login` | Sign in with a database-backed user account. Returns `{ access_token, refresh_token, expires_in, user }`. |
-| POST | `/api/auth/refresh` | Rotate a refresh token and obtain a new access token pair. |
-| POST | `/api/auth/logout` | Revoke the current refresh token. |
-| GET  | `/api/auth/me` | Return the current authenticated user. |
-| POST | `/api/auth/kiosk` | Localhost-only auto-login for the kiosk display. |
-| POST | `/api/auth/register` | Optional self-registration when enabled with a registration code. |
-| POST | `/api/admin/users` | Admin-only user creation endpoint. |
-| POST | `/api/admin/system/restart` | Admin-only Raspberry Pi restart trigger. |
-| GET  | `/api/admin/activity` | Admin-only audit log of auth and control actions. |
-| GET  | `/api/system/health` | Backend + Home Assistant reachability. |
-| GET  | `/api/ha/entities` | Raw Home Assistant entity list (for device mapping). |
-| GET  | `/api/rooms` · `/api/rooms/{id}` | Rooms with nested device state. |
-| POST | `/api/rooms/{id}/set` | Power a room on or off by updating all toggle-capable devices in that room. |
-| GET  | `/api/devices` · `/api/devices/{id}` | Flat device list / single device. |
-| POST | `/api/devices/{id}/toggle` | Toggle a device. |
-| POST | `/api/devices/{id}/set` | Set brightness / percentage / color / state. |
-| GET  | `/api/scenes` · `/api/scenes/{id}` | Scenes (routines). |
-| POST | `/api/scenes/{id}/run` | Run a scene. |
-| POST | `/api/voice/command` | Submit transcribed text for intent matching. Returns `{ understood, message, matched_device_ids, navigate? }`. |
-| POST | `/api/voice/event` | Push a voice pipeline status update (`listening`, `processing`, ...). |
-| GET  | `/api/voice/commands` | Enumerates templates and valid targets (for help / UI hints). |
-| WS   | `/ws?token=...` | Realtime `snapshot`, `device.updated`, `voice.status`, `voice.command`, `scene.ran` events. |
+Useful commands:
 
-## iOS App Plan
+```bash
+sudo systemctl status vokrr-wifi.service --no-pager
+sudo systemctl status vokrr-stack.service --no-pager
+sudo systemctl status vokrr-kiosk.service --no-pager
+journalctl -u vokrr-kiosk.service -b --no-pager
+docker compose -f infra/docker-compose.yml ps
+```
 
-See `implementation_plan.md` §9 for the full plan. At a high level, the iOS app talks to the same backend as the touchscreen UI — never to Home Assistant directly — and mirrors the touchscreen's visual language (glass surfaces, audio-reactive aurora background, Jarvis status bar, notifications, rooms/devices, routines, activity, news).
+## Environment Variables
 
-The current native app implementation lives in [ios/Vokrr](./ios/Vokrr) and its setup/testing notes live in [docs/setup/ios-app.md](./docs/setup/ios-app.md).
+`.env.example` is the canonical template. Full documentation is in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
+
+Security notes:
+
+- Never commit `.env`, `scripts/.env`, Home Assistant tokens, Spotify tokens, NVIDIA keys, or Cloudflare tokens.
+- `backend/data/` contains runtime databases and OAuth tokens.
+- Expose only the backend through Cloudflare Tunnel. Do not expose Home Assistant directly.
+
+## Documentation
+
+- [Hardware](docs/HARDWARE.md)
+- [Software stack](docs/SOFTWARE_STACK.md)
+- [Installation](docs/INSTALLATION.md)
+- [User guide](docs/USER_GUIDE.md)
+- [Developer guide](docs/DEVELOPER_GUIDE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Environment](docs/ENVIRONMENT.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Cloudflare Tunnel](docs/deployment/cloudflare-tunnel.md)
+- [Home Assistant setup](docs/setup/home-assistant.md)
+- [iOS app notes](docs/setup/ios-app.md)
+
+## Troubleshooting
+
+Run the project health check:
+
+```bash
+scripts/health_check.sh
+```
+
+Common checks:
+
+```bash
+curl -sS http://localhost:8080/api/system/health
+curl -sS http://localhost:8091/health
+docker compose -f infra/docker-compose.yml logs --tail=100 backend
+docker compose -f infra/docker-compose.yml logs --tail=100 voice-listener
+journalctl -u vokrr-kiosk.service -b --no-pager
+```
+
+For detailed fixes, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## Maintenance Notes
+
+- Rebuild containers after Python/service changes:
+  ```bash
+  docker compose -f infra/docker-compose.yml up -d --build backend voice-listener
+  ```
+- Rebuild the kiosk after QML/C++ changes:
+  ```bash
+  cmake --build qt-frontend/build
+  sudo systemctl restart vokrr-kiosk.service
+  ```
+- Restart audio-dependent services after audio hardware changes:
+  ```bash
+  scripts/restart_audio_stack.sh
+  ```
+- Refresh imported HA devices from the UI or:
+  ```bash
+  curl -X POST http://localhost:8080/api/devices/refresh \
+    -H "Authorization: Bearer $ACCESS_TOKEN"
+  ```
+
+## Manual Verification Checklist
+
+- Backend health returns `ok: true`.
+- Home Assistant UI opens and the token can read `/api/states`.
+- Qt kiosk starts fullscreen and touch input maps correctly.
+- Device toggles update Home Assistant and return to the UI through WebSocket events.
+- Restarting the backend performs the initial HA state sync.
+- Voice listener reports `waiting for wake-word`, wakes on `Jarvis`, listens for one command for up to 10 seconds, then resets.
+- Spotify playback shows either auth-needed state or current playback.
+- Camera panel shows a local camera feed or a clear no-camera message.
