@@ -32,6 +32,12 @@ class DeviceService:
         seen_entity_ids: set[str] = set()
         for entity in await self.ha_client.states():
             seen_entity_ids.add(entity["entity_id"])
+            device = self.registry.get_device(
+                self.registry.entity_to_device_id.get(entity["entity_id"], "")
+            )
+            if device is not None and self._is_guarded_multigang_base(device):
+                self._apply_guarded_base_state(device)
+                continue
             self.registry.update_from_ha_state(
                 entity_id=entity["entity_id"],
                 state=entity["state"],
@@ -46,6 +52,10 @@ class DeviceService:
         return self.rooms()
 
     async def _sync_device_state(self, device: Device) -> Device:
+        if self._is_guarded_multigang_base(device):
+            self._apply_guarded_base_state(device)
+            return device
+
         for entity in await self.ha_client.states():
             if entity["entity_id"] == device.entity_id:
                 updated = self.registry.update_from_ha_state(
@@ -71,6 +81,19 @@ class DeviceService:
             await asyncio.sleep(0.5)
             latest = await self._sync_device_state(device)
         return latest
+
+    def _is_guarded_multigang_base(self, device: Device) -> bool:
+        return self.registry.is_guarded_multigang_base(device.entity_id)
+
+    def _apply_guarded_base_state(self, device: Device) -> None:
+        self.registry.update_from_ha_state(
+            device.entity_id,
+            device.state.state,
+            device.state.attributes,
+        )
+
+    def _remember_guarded_base_state(self, device: Device, is_on: bool) -> None:
+        self.registry.remember_guarded_base_state(device.entity_id, is_on)
 
     def _indexed_sibling_devices(self, device: Device) -> list[Device]:
         entity_ids = set(self.registry.entity_to_device_id)
@@ -143,6 +166,7 @@ class DeviceService:
         await self.ha_client.call_service(domain, service, {"entity_id": device.entity_id})
         if siblings:
             await self._restore_sibling_states(sibling_states)
+            self._remember_guarded_base_state(device, expected_is_on)
             await asyncio.sleep(2)
             await self.sync_states()
             return await self._sync_device_state(device)
@@ -176,6 +200,7 @@ class DeviceService:
             )
             if siblings:
                 await self._restore_sibling_states(sibling_states)
+                self._remember_guarded_base_state(device, request.state)
                 await asyncio.sleep(2)
                 await self.sync_states()
                 device = await self._sync_device_state(device)

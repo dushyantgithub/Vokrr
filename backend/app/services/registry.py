@@ -53,6 +53,7 @@ class DeviceRegistry:
         self.scenes_by_id: dict[str, Scene] = {}
         self.devices: dict[str, Device] = {}
         self.entity_to_device_id: dict[str, str] = {}
+        self.guarded_base_states: dict[str, DeviceState] = {}
 
     def load(self) -> None:
         if not self.config_path.exists():
@@ -205,6 +206,47 @@ class DeviceRegistry:
     def get_scene(self, scene_id: str) -> Scene | None:
         return self.scenes_by_id.get(scene_id)
 
+    def is_guarded_multigang_base(self, entity_id: str) -> bool:
+        if entity_id.rsplit("_", 1)[-1].isdigit():
+            return False
+
+        entity_ids = set(self.entity_to_device_id)
+        base_entity_ids = [entity_id]
+        if "_" in entity_id:
+            base_entity_ids.append(entity_id.rsplit("_", 1)[0])
+
+        return any(
+            is_unindexed_multigang_base_entity(base_entity_id, entity_ids)
+            for base_entity_id in base_entity_ids
+        )
+
+    def remember_guarded_base_state(self, entity_id: str, is_on: bool) -> DeviceState:
+        existing_attributes: dict[str, Any] = {}
+        device_id = self.entity_to_device_id.get(entity_id)
+        if device_id and (device := self.devices.get(device_id)) is not None:
+            existing_attributes = device.state.attributes
+
+        state = DeviceState(
+            state="on" if is_on else "off",
+            is_on=is_on,
+            attributes={
+                **existing_attributes,
+                "guarded_multigang_base": True,
+                "source": "vokrr",
+            },
+        )
+        self.guarded_base_states[entity_id] = state
+        if device_id and (device := self.devices.get(device_id)) is not None:
+            device.state = state
+        return state
+
+    def _guarded_base_state(self, entity_id: str) -> DeviceState:
+        remembered = self.guarded_base_states.get(entity_id)
+        if remembered is not None:
+            return remembered
+
+        return self.remember_guarded_base_state(entity_id, False)
+
     def update_from_ha_state(self, entity_id: str, state: str, attributes: dict[str, Any]) -> Device | None:
         if is_excluded_entity(entity_id, attributes=attributes):
             return None
@@ -214,6 +256,10 @@ class DeviceRegistry:
             return None
 
         device = self.devices[device_id]
+        if self.is_guarded_multigang_base(entity_id):
+            device.state = self._guarded_base_state(entity_id)
+            return device
+
         device.state = normalize_state(state, attributes)
         return device
 
