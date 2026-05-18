@@ -59,6 +59,10 @@ ApplicationWindow {
     property var pendingDeviceToggles: ({})
     property double lastDeviceToggleAt: 0
     property string lastDeviceToggleId: ""
+    property bool realtimeConnected: false
+    property bool realtimeReconnectPending: false
+    property int realtimeReconnectDelay: 1000
+    property int realtimeReconnectMaxDelay: 15000
     readonly property int appNavigatorWidth: 64
     readonly property int appNavigatorHeight: 254
     readonly property int appNavigatorLeftMargin: 8
@@ -490,15 +494,75 @@ ApplicationWindow {
     }
 
     function mergeDevice(updated) {
+        if (!updated)
+            return false
         var nextRooms = JSON.parse(JSON.stringify(rooms))
+        var changed = false
         for (var i = 0; i < nextRooms.length; i++) {
             var devices = nextRooms[i].devices || []
             for (var j = 0; j < devices.length; j++) {
-                if (devices[j].id === updated.id)
+                var current = devices[j]
+                var sameDevice = current.id === updated.id
+                var sameEntity = updated.entity_id && current.entity_id === updated.entity_id
+                if ((sameDevice || sameEntity) && JSON.stringify(current) !== JSON.stringify(updated)) {
                     devices[j] = updated
+                    changed = true
+                }
             }
         }
-        rooms = nextRooms
+        if (changed)
+            rooms = nextRooms
+        return changed
+    }
+
+    function mergeDeviceList(updatedDevices) {
+        if (!updatedDevices || !updatedDevices.length)
+            return
+        for (var i = 0; i < updatedDevices.length; i++)
+            mergeDevice(updatedDevices[i])
+    }
+
+    function pollDeviceStates() {
+        if (!token)
+            return
+        http("GET", "/api/devices", null, function(status, data) {
+            if (status >= 200 && status < 300 && data)
+                mergeDeviceList(data)
+        })
+    }
+
+    function reconnectRealtime() {
+        if (!token || realtimeReconnectPending || ws.status === WebSocket.Open || ws.status === WebSocket.Connecting)
+            return
+        realtimeReconnectPending = true
+        realtimeReconnectTimer.interval = realtimeReconnectDelay
+        realtimeReconnectTimer.restart()
+    }
+
+    function restartRealtime() {
+        realtimeReconnectPending = false
+        if (!token || ws.status === WebSocket.Open || ws.status === WebSocket.Connecting)
+            return
+        ws.active = false
+        ws.active = true
+    }
+
+    function handleRealtimeStatus(status) {
+        realtimeConnected = status === WebSocket.Open
+        if (status === WebSocket.Open) {
+            realtimeReconnectPending = false
+            realtimeReconnectDelay = 1000
+            pollDeviceStates()
+            return
+        }
+        if (!token)
+            return
+        if (status === WebSocket.Error || status === WebSocket.Closed) {
+            if (status === WebSocket.Error)
+                pushNotification("Realtime feed disconnected", "warn")
+            reconnectRealtime()
+            realtimeReconnectDelay = Math.min(realtimeReconnectDelay * 2, realtimeReconnectMaxDelay)
+        }
     }
 
     function optimisticToggleDevice(device) {
@@ -619,6 +683,19 @@ ApplicationWindow {
         onTriggered: loadSpotifyStatus()
     }
 
+    Timer {
+        running: token.length > 0 && activeView === "Dashboard" && !realtimeConnected
+        repeat: true
+        interval: 7000
+        onTriggered: pollDeviceStates()
+    }
+
+    Timer {
+        id: realtimeReconnectTimer
+        repeat: false
+        onTriggered: restartRealtime()
+    }
+
     WebSocket {
         id: ws
         active: false
@@ -640,8 +717,7 @@ ApplicationWindow {
             }
         }
         onStatusChanged: function(status) {
-            if (token && status === WebSocket.Error)
-                pushNotification("Realtime feed disconnected", "warn")
+            handleRealtimeStatus(status)
         }
     }
 

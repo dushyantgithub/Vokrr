@@ -5,6 +5,7 @@ GlassPanel {
     id: root
 
     property var devices: []
+    property string roomId: ""
     property int pageIndex: 0
     readonly property int pageCount: Math.max(1, Math.ceil(devices.length / 4))
     signal deviceActivated(var rawDevice)
@@ -14,7 +15,8 @@ GlassPanel {
     radius: theme.radiusXl
     padding: theme.space4
 
-    onDevicesChanged: pageIndex = 0
+    onRoomIdChanged: pageIndex = 0
+    onPageCountChanged: pageIndex = Math.max(0, Math.min(pageIndex, pageCount - 1))
 
     function pageDevices() {
         var start = pageIndex * 4

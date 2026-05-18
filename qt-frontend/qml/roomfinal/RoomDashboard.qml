@@ -271,6 +271,7 @@ Item {
         width: root.leftColumnWidth
         height: root.pagerHeight
         theme: theme
+        roomId: root.selectedRoom && root.selectedRoom.id ? root.selectedRoom.id : ""
         devices: root.selectedDevices
         onDeviceActivated: function(rawDevice) { root.deviceActionRequested(rawDevice) }
     }
