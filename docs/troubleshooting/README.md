@@ -1,29 +1,13 @@
 # Troubleshooting
 
-## Backend Cannot Reach Home Assistant
+The maintained troubleshooting guide is [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md).
 
-Check that Home Assistant is listening on the host:
-
-```bash
-curl http://localhost:8123/api/
-```
-
-Then check the backend environment:
+Quick checks:
 
 ```bash
-docker compose -f infra/docker-compose.yml exec backend env | grep HOME_ASSISTANT
+scripts/health_check.sh
+curl -sS http://localhost:8080/api/system/health | python3 -m json.tool
+curl -sS http://localhost:8091/health | python3 -m json.tool
+docker compose -f infra/docker-compose.yml ps
 ```
-
-For this stack, `HOME_ASSISTANT_URL` should normally be `http://host.docker.internal:8123`.
-
-## UI Loads But Devices Are Missing
-
-Check the mapping file:
-
-```bash
-cat home-assistant/config/devices.yaml
-curl http://localhost:8080/api/rooms
-```
-
-The example entity IDs must be replaced with real Home Assistant entity IDs from `/api/ha/entities`.
 

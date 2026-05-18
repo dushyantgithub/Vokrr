@@ -70,13 +70,15 @@ services:
 
   voice-listener:
     build:
-      context: ../voice-pipeline/listener
+      context: ..
+      dockerfile: voice-pipeline/listener/Dockerfile
     container_name: vokrr-voice-listener
     restart: unless-stopped
     network_mode: host
     privileged: true
     env_file:
       - ../scripts/.env
+      - ../.env
       - ../backend/data/audio-output.env
     environment:
       PORCUPINE_KEYWORD_PATH: /wake-word/Jarvis_en_raspberry-pi_v4_0_0.ppn

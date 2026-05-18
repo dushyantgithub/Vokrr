@@ -5,11 +5,14 @@ import random
 import subprocess
 import threading
 import time
+import asyncio
 from pathlib import Path
 
 import httpx
 import numpy as np
 from fastapi import FastAPI
+
+from services.voice_pipeline import VoicePipeline
 
 BACKEND_URL = os.getenv("VOICE_BACKEND_URL", "http://localhost:8080").rstrip("/")
 APP_USERNAME = os.getenv("APP_BOOTSTRAP_ADMIN_USERNAME") or os.getenv("APP_USERNAME", "admin")
@@ -34,6 +37,7 @@ VOICE_FEEDBACK_MISUNDERSTOOD_TEXT = os.getenv(
 )
 VOICE_TTS_COMMAND = os.getenv("VOICE_TTS_COMMAND", "espeak-ng")
 VOICE_TTS_RATE = os.getenv("VOICE_TTS_RATE", "150")
+VOICE_NVIDIA_PIPELINE_ENABLED = os.getenv("VOICE_NVIDIA_PIPELINE_ENABLED", "1") == "1"
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base.en")
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "en")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
@@ -58,6 +62,7 @@ status = {
 }
 token_cache = {"token": None, "time": 0.0}
 whisper_cache = {"model": None}
+pipeline_cache = {"pipeline": None}
 
 
 @app.on_event("startup")
@@ -121,7 +126,7 @@ def run_listener() -> None:
     status.update(
         ok=True,
         state="idle",
-        message=f"Listening for {WAKE_WORD_DISPLAY}",
+        message="waiting for wake-word",
         sample_rate=sample_rate,
         input_sample_rate=input_sample_rate,
         frame_length=frame_length,
@@ -157,8 +162,14 @@ def run_listener() -> None:
                     continue
 
                 prompt = random.choice(ASSIST_PROMPTS)
-                status.update(ok=True, state="listening", message=prompt, last_wake=time.time())
-                post_voice_event("listening", prompt)
+                status.update(
+                    ok=True,
+                    state="listening",
+                    message="waiting for command",
+                    last_wake=time.time(),
+                )
+                post_voice_event("listening", "waiting for command")
+                stop_pipeline_speech()
                 speak(prompt)
                 drain_audio_queue()
                 pending_audio = np.array([], dtype=np.int16)
@@ -168,6 +179,7 @@ def run_listener() -> None:
 
                 if text:
                     submit_command(text)
+                    reset_to_idle(delay_seconds=1)
                 else:
                     status.update(ok=True, state="idle", message=VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
                     speak(VOICE_FEEDBACK_MISUNDERSTOOD_TEXT)
@@ -219,8 +231,8 @@ def record_command(next_frame, sample_rate: int) -> np.ndarray:
     started_at = time.time()
     last_voice_at = started_at
 
-    status.update(ok=True, state="recording", message="Listening...")
-    post_voice_event("listening", "Listening...")
+    status.update(ok=True, state="recording", message="waiting for command")
+    post_voice_event("listening", "waiting for command")
 
     while time.time() - started_at < COMMAND_RECORD_SECONDS:
         pcm = next_frame()
@@ -244,6 +256,7 @@ def transcribe_audio(audio: np.ndarray, sample_rate: int) -> str:
 
     status.update(ok=True, state="transcribing", message="Transcribing...")
     post_voice_event("processing", "Transcribing...")
+    started = time.perf_counter()
     model = load_whisper_model()
     audio_float = audio.astype(np.float32) / 32768.0
     segments, _info = model.transcribe(
@@ -252,6 +265,7 @@ def transcribe_audio(audio: np.ndarray, sample_rate: int) -> str:
         vad_filter=True,
     )
     text = " ".join(segment.text.strip() for segment in segments).strip()
+    status.update(last_stt_duration_ms=round((time.perf_counter() - started) * 1000, 2))
     logger.info("Whisper recognized command: %s", text)
     return text.lower()
 
@@ -276,6 +290,31 @@ def pcm_from_bytes(data: bytes) -> np.ndarray:
 def submit_command(text: str) -> None:
     status.update(ok=True, state="processing", message=f"Heard: {text}")
     post_voice_event("processing", status["message"])
+    if VOICE_NVIDIA_PIPELINE_ENABLED:
+        try:
+            pipeline = get_voice_pipeline()
+            if not pipeline.llm_service.configured or not pipeline.tts_service.configured:
+                logger.warning("NVIDIA voice pipeline is enabled but API key is missing")
+                raise RuntimeError("NVIDIA API key is missing")
+            result = asyncio.run(
+                pipeline.handle_text(
+                    text,
+                    stt_duration_ms=status.get("last_stt_duration_ms"),
+                    speak=VOICE_FEEDBACK_ENABLED,
+                )
+            )
+            status.update(
+                ok=result.error is None,
+                state="idle",
+                message=result.reply,
+                last_pipeline=result.as_dict(),
+            )
+            post_voice_event("done" if result.error is None else "error", result.reply)
+            return
+        except Exception as exc:
+            logger.exception("NVIDIA voice pipeline failed; falling back to backend intent")
+            status.update(ok=False, state="pipeline_error", message=str(exc))
+
     try:
         token = get_token()
         with httpx.Client(timeout=20) as client:
@@ -301,6 +340,21 @@ def submit_command(text: str) -> None:
         post_voice_event("error", "Voice command failed")
     finally:
         reset_to_idle(delay_seconds=2)
+
+
+def get_voice_pipeline() -> VoicePipeline:
+    if pipeline_cache["pipeline"] is None:
+        pipeline_cache["pipeline"] = VoicePipeline()
+    return pipeline_cache["pipeline"]
+
+
+def stop_pipeline_speech() -> None:
+    pipeline = pipeline_cache.get("pipeline")
+    if pipeline is not None:
+        try:
+            pipeline.stop_speech()
+        except Exception:
+            logger.debug("Could not stop current speech", exc_info=True)
 
 
 def post_voice_event(event_status: str, message: str) -> None:
@@ -333,7 +387,7 @@ def get_token() -> str:
 def reset_to_idle(delay_seconds: float = 0) -> None:
     if delay_seconds:
         time.sleep(delay_seconds)
-    message = f"Listening for {WAKE_WORD_DISPLAY}"
+    message = "waiting for wake-word"
     status.update(ok=True, state="idle", message=message)
     post_voice_event("idle", message)
 

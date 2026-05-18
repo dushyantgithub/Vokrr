@@ -14,6 +14,8 @@ Item {
     property string mediaAlbum: ""
     property string mediaArtUrl: ""
     property bool darkMode: true
+    property bool voicePipelineActive: false
+    property string voiceStatusText: voicePipelineActive ? "waiting for command" : "waiting for wake-word"
     signal roomSelected(string roomId)
     signal deviceActionRequested(var device)
     signal mediaActionRequested(string action)
@@ -232,6 +234,8 @@ Item {
         deviceCount: root.selectedDevices.length
         timeText: root.timeText
         dateText: root.dateText
+        voicePipelineActive: root.voicePipelineActive
+        voiceStatusText: root.voiceStatusText
         onRoomSelected: function(index) { root.setRoomIndex(index) }
         onThemeRequested: root.themeModeRequested(!root.darkMode)
     }

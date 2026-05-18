@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 
+async def sync_home_assistant_on_startup(state, attempts: int = 12) -> None:
+    for attempt in range(1, attempts + 1):
+        try:
+            await state.onboarding_service.import_discovered_devices()
+            await state.device_service.sync_states()
+            await state.state_sync.reconcile_once(broadcast=False)
+            logger.info("Initial Home Assistant state sync completed on attempt %s", attempt)
+            return
+        except Exception:
+            if attempt >= attempts:
+                logger.exception("Initial Home Assistant state sync failed after retries")
+                return
+            logger.warning(
+                "Initial Home Assistant state sync failed; retrying (%s/%s)",
+                attempt,
+                attempts,
+                exc_info=True,
+            )
+            await asyncio.sleep(min(2 * attempt, 10))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state = build_app_state()
@@ -20,11 +42,8 @@ async def lifespan(app: FastAPI):
     Path(state.settings.onboarding_database_path).parent.mkdir(parents=True, exist_ok=True)
     Path(state.settings.spotify_token_path).parent.mkdir(parents=True, exist_ok=True)
     set_app_state(state)
-    try:
-        await state.device_service.sync_states()
-    except Exception:
-        logger.exception("Initial Home Assistant state sync failed")
     if state.settings.home_assistant_token:
+        await sync_home_assistant_on_startup(state)
         state.state_sync.start()
     yield
     await state.state_sync.stop()
