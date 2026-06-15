@@ -14,9 +14,9 @@ Item {
     readonly property int space12: 24
 
     readonly property int radiusSm: 10
-    readonly property int radiusMd: 14
-    readonly property int radiusLg: 18
-    readonly property int radiusXl: 22
+    readonly property int radiusMd: 16
+    readonly property int radiusLg: 22
+    readonly property int radiusXl: 28
     readonly property int radiusFull: 999
 
     readonly property int displaySm: 26
@@ -27,39 +27,39 @@ Item {
     readonly property int numberMd: 16
     readonly property int numberLg: 22
 
-    readonly property color bgApp: darkMode ? "#212121" : "#e8e8e8"
-    readonly property color bgSurface: darkMode ? "#0B1220" : "#FFFFFF"
-    readonly property color bgSurfaceSoft: darkMode ? "#101827" : "#F1F7FF"
-    readonly property color bgSurfaceGlass: darkMode ? "#B80A1220" : "#BFFFFFFF"
-    readonly property color bgOverlay: darkMode ? "#75030712" : "#4DFFFFFF"
+    readonly property color bgApp: darkMode ? "#111113" : "#F5F5F7"
+    readonly property color bgSurface: darkMode ? "#1C1C1E" : "#FFFFFF"
+    readonly property color bgSurfaceSoft: darkMode ? "#242426" : "#ECEEF3"
+    readonly property color bgSurfaceGlass: darkMode ? "#D11C1C1E" : "#E8FFFFFF"
+    readonly property color bgOverlay: darkMode ? "#8A111113" : "#47FFFFFF"
 
-    readonly property color borderSubtle: darkMode ? "#2494A3B8" : "#1A0F172A"
-    readonly property color borderActive: darkMode ? "#6B2D7DFF" : "#611E6BFF"
-    readonly property color borderGlow: darkMode ? "#5900AEEF" : "#47009EE2"
+    readonly property color borderSubtle: darkMode ? "#343437" : "#D9DCE3"
+    readonly property color borderActive: darkMode ? "#66FFFFFF" : "#7AFFFFFF"
+    readonly property color borderGlow: darkMode ? "#595AC8FA" : "#4764D2FF"
 
-    readonly property color textPrimary: darkMode ? "#e8e8e8" : "#212121"
-    readonly property color textSecondary: darkMode ? "#CBD5E1" : "#334155"
-    readonly property color textMuted: darkMode ? "#94A3B8" : "#64748B"
-    readonly property color textDisabled: darkMode ? "#64748B" : "#94A3B8"
-    readonly property color textInverse: darkMode ? "#020617" : "#FFFFFF"
-    readonly property color iconColor: darkMode ? "#e8e8e8" : "#212121"
+    readonly property color textPrimary: darkMode ? "#F5F5F7" : "#1D1D1F"
+    readonly property color textSecondary: darkMode ? "#D1D1D6" : "#3A3A3C"
+    readonly property color textMuted: darkMode ? "#A1A1AA" : "#6E6E73"
+    readonly property color textDisabled: darkMode ? "#636366" : "#AEAEB2"
+    readonly property color textInverse: darkMode ? "#111113" : "#FFFFFF"
+    readonly property color iconColor: darkMode ? "#F5F5F7" : "#1D1D1F"
 
-    readonly property color accentBlue: darkMode ? "#2D7DFF" : "#1E6BFF"
-    readonly property color accentCyan: darkMode ? "#00AEEF" : "#009EE2"
-    readonly property color accentCyanSoft: darkMode ? "#38BDF8" : "#0284C7"
-    readonly property color accentGreen: darkMode ? "#00D26A" : "#00A85A"
-    readonly property color accentYellow: darkMode ? "#FBBF24" : "#EAB308"
-    readonly property color accentOrange: darkMode ? "#F59E0B" : "#EA8A00"
-    readonly property color accentRed: darkMode ? "#FF3B30" : "#E53935"
-    readonly property color accentPurple: darkMode ? "#8B5CF6" : "#7C3AED"
+    readonly property color accentBlue: darkMode ? "#64D2FF" : "#007AFF"
+    readonly property color accentCyan: darkMode ? "#5AC8FA" : "#0A84FF"
+    readonly property color accentCyanSoft: darkMode ? "#7DDCFF" : "#3C8CFF"
+    readonly property color accentGreen: darkMode ? "#30D158" : "#34C759"
+    readonly property color accentYellow: darkMode ? "#FFD60A" : "#F5B301"
+    readonly property color accentOrange: darkMode ? "#FF9F0A" : "#FF9500"
+    readonly property color accentRed: darkMode ? "#FF453A" : "#FF3B30"
+    readonly property color accentPurple: darkMode ? "#BF5AF2" : "#AF52DE"
 
-    readonly property color cardTop: darkMode ? "#EA0F172A" : "#F0FFFFFF"
-    readonly property color cardBottom: darkMode ? "#C7020617" : "#D1F1F7FF"
-    readonly property color activeTop: darkMode ? "#572D7DFF" : "#2E2D7DFF"
-    readonly property color activeBottom: darkMode ? "#1F00AEEF" : "#1A00AEEF"
-    readonly property color shadow: darkMode ? "#57000000" : "#1A0F172A"
-    readonly property color appGlow: darkMode ? "#2400AEEF" : "#2E00AEEF"
-    readonly property color pressFill: darkMode ? "#1FFFFFFF" : "#1A1E6BFF"
+    readonly property color cardTop: darkMode ? "#F0222226" : "#F7FFFFFF"
+    readonly property color cardBottom: darkMode ? "#DE171719" : "#EDEFF4FA"
+    readonly property color activeTop: darkMode ? "#4DFFFFFF" : "#FFFFFFFF"
+    readonly property color activeBottom: darkMode ? "#2E5AC8FA" : "#E8FFFFFF"
+    readonly property color shadow: darkMode ? "#A8000000" : "#26000000"
+    readonly property color appGlow: darkMode ? "#1F5AC8FA" : "#2664D2FF"
+    readonly property color pressFill: darkMode ? "#24FFFFFF" : "#1F000000"
 
     function family() { return "Inter" }
 
@@ -73,6 +73,8 @@ Item {
             return accentBlue
         if (value === "ac" || value === "camera" || value === "speaker" || value === "switch")
             return accentCyan
+        if (value === "plug")
+            return accentGreen
         if (value === "purifier" || value === "sensor")
             return accentGreen
         return accentCyanSoft

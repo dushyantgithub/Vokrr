@@ -1,4 +1,5 @@
 import QtQuick
+import "../components" as VokrrComponents
 
 Item {
     id: root
@@ -18,6 +19,7 @@ Item {
     property string voiceStatusText: voicePipelineActive ? "waiting for command" : "waiting for wake-word"
     signal roomSelected(string roomId)
     signal deviceActionRequested(var device)
+    signal deviceSetRequested(var device, var payload)
     signal mediaActionRequested(string action)
     signal themeModeRequested(bool darkMode)
 
@@ -26,54 +28,52 @@ Item {
         darkMode: root.darkMode
     }
 
+    readonly property var dashboardTheme: theme
+
     Rectangle {
         anchors.fill: parent
         color: theme.bgApp
     }
 
-    Canvas {
-        id: glow
-        anchors.fill: parent
-        antialiasing: true
-        onPaint: {
-            var ctx = getContext("2d")
-            ctx.clearRect(0, 0, width, height)
-            var gradient = ctx.createRadialGradient(width * 0.76, height * 0.14, 0, width * 0.76, height * 0.14, width * 0.38)
-            gradient.addColorStop(0, theme.appGlow)
-            gradient.addColorStop(1, "transparent")
-            ctx.fillStyle = gradient
-            ctx.fillRect(0, 0, width, height)
-        }
-        Connections {
-            target: theme
-            function onDarkModeChanged() { glow.requestPaint() }
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: Math.min(172, parent.height * 0.4)
+        opacity: theme.darkMode ? 0.55 : 0.8
+        gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0; color: theme.darkMode ? "#202426" : "#FFFFFFFF" }
+            GradientStop { position: 1; color: theme.bgApp }
         }
     }
 
     readonly property var effectiveRooms: rooms && rooms.length ? rooms : []
-    readonly property var selectedRoom: effectiveRooms.length ? effectiveRooms[Math.max(0, Math.min(currentRoomIndex, effectiveRooms.length - 1))] : null
+    readonly property int safeRoomIndex: Math.max(0, Math.min(currentRoomIndex, Math.max(0, effectiveRooms.length - 1)))
+    readonly property var selectedRoom: effectiveRooms.length ? effectiveRooms[safeRoomIndex] : null
     readonly property var selectedDevices: normalizeDevices(selectedRoom && selectedRoom.devices ? selectedRoom.devices : [])
-    readonly property real designWidth: 640
-    readonly property real designHeight: 480
-    readonly property real scaleFactor: Math.max(1, Math.min(width / designWidth, height / designHeight))
-    readonly property real contentX: Math.max(84, Math.round(width * 0.13))
-    readonly property real contentRightMargin: 14
-    readonly property real contentGap: 8 * scaleFactor
-    readonly property real contentWidth: Math.max(420, width - contentX - contentRightMargin)
-    readonly property real rightColumnWidth: Math.max(184, Math.min(260, contentWidth * 0.34))
-    readonly property real leftColumnWidth: Math.max(300, contentWidth - rightColumnWidth - contentGap)
-    readonly property real topMargin: 12
-    readonly property real headerHeight: 56
-    readonly property real mainTop: topMargin + headerHeight + 8
-    readonly property real bottomMargin: 12
-    readonly property real mediaHeight: 74
-    readonly property real mediaTop: height - bottomMargin - mediaHeight
-    readonly property real weatherHeight: Math.min(132, Math.max(112, (mediaTop - mainTop - contentGap * 2) * 0.32))
-    readonly property real cameraTop: mainTop + weatherHeight + contentGap
-    readonly property real cameraHeight: Math.max(120, mediaTop - cameraTop - contentGap)
-    readonly property real heroHeight: Math.max(180, Math.min(260, height * 0.46))
-    readonly property real pagerTop: mainTop + heroHeight + contentGap
-    readonly property real pagerHeight: Math.max(150, height - pagerTop - bottomMargin)
+    readonly property real contentLeft: width >= 760 ? 88 : 78
+    readonly property real contentRight: 16
+    readonly property real contentTop: 12
+    readonly property real contentWidth: Math.max(420, width - contentLeft - contentRight)
+    readonly property bool sideRailVisible: contentWidth >= 620
+    readonly property real gap: 10
+    readonly property real sideWidth: sideRailVisible ? Math.min(198, Math.max(178, contentWidth * 0.28)) : 0
+    readonly property real gridWidth: sideRailVisible ? contentWidth - sideWidth - gap : contentWidth
+    readonly property real headerHeight: 62
+    readonly property real mainTop: contentTop + headerHeight + 10
+    readonly property real bottomMargin: 14
+    readonly property real mainHeight: Math.max(280, height - mainTop - bottomMargin)
+    readonly property int gridColumns: Math.max(2, Math.min(3, Math.floor((gridWidth + gap) / 158)))
+    readonly property real cardWidth: Math.floor((gridWidth - gap * (gridColumns - 1)) / gridColumns)
+    readonly property real cardHeight: sideRailVisible ? 130 : 126
+    readonly property bool compactHeader: contentWidth < 650
+    readonly property real titleBlockWidth: compactHeader ? 82 : 98
+    readonly property real timePanelWidth: compactHeader ? 92 : 104
+    readonly property real togglePanelWidth: 68
+    readonly property real voicePanelWidth: compactHeader ? 0 : 132
+    readonly property real headerGapCount: compactHeader ? 3 : 4
+    readonly property real roomSelectorWidth: Math.max(188, contentWidth - titleBlockWidth - timePanelWidth - togglePanelWidth - voicePanelWidth - gap * headerGapCount)
 
     Component.onCompleted: updateClock()
 
@@ -84,6 +84,375 @@ Item {
         onTriggered: root.updateClock()
     }
 
+    Row {
+        id: headerRow
+        x: root.contentLeft
+        y: root.contentTop
+        width: root.contentWidth
+        height: root.headerHeight
+        spacing: root.gap
+
+        Item {
+            width: root.titleBlockWidth
+            height: parent.height
+
+            Text {
+                x: 0
+                y: 5
+                width: parent.width
+                text: "Home"
+                color: theme.textPrimary
+                font.family: theme.family()
+                font.pixelSize: 26
+                font.bold: true
+                elide: Text.ElideRight
+            }
+
+            Text {
+                x: 1
+                y: 38
+                width: parent.width
+                text: activeDeviceCount() + " active"
+                color: theme.textMuted
+                font.family: theme.family()
+                font.pixelSize: 11
+                font.bold: true
+                elide: Text.ElideRight
+            }
+        }
+
+        GlassPanel {
+            width: root.roomSelectorWidth
+            height: 52
+            y: 4
+            theme: root.dashboardTheme
+            radius: theme.radiusLg
+            padding: 0
+            active: true
+
+            VokrrComponents.Button {
+                x: 4
+                y: 4
+                width: 38
+                height: 38
+                variant: "ghost"
+                darkMode: theme.darkMode
+                enabled: root.effectiveRooms.length > 1
+                opacity: enabled ? 1 : 0.35
+
+                SvgIcon {
+                    anchors.centerIn: parent
+                    width: 18
+                    height: 18
+                    name: "chevron-left"
+                    darkMode: theme.darkMode
+                }
+
+                onClicked: root.moveRoom(-1)
+            }
+
+            SvgIcon {
+                x: 48
+                y: 15
+                width: 20
+                height: 20
+                name: "house"
+                darkMode: theme.darkMode
+            }
+
+            Column {
+                x: 74
+                y: 8
+                width: parent.width - 118
+                spacing: 0
+
+                Text {
+                    width: parent.width
+                    text: root.roomName()
+                    color: theme.textPrimary
+                    font.family: theme.family()
+                    font.pixelSize: 15
+                    font.bold: true
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    width: parent.width
+                    text: root.selectedDevices.length + " devices"
+                    color: theme.textMuted
+                    font.family: theme.family()
+                    font.pixelSize: 10
+                    font.bold: true
+                    elide: Text.ElideRight
+                }
+            }
+
+            VokrrComponents.Button {
+                x: parent.width - 42
+                y: 4
+                width: 38
+                height: 38
+                variant: "ghost"
+                darkMode: theme.darkMode
+                enabled: root.effectiveRooms.length > 1
+                opacity: enabled ? 1 : 0.35
+
+                SvgIcon {
+                    anchors.centerIn: parent
+                    width: 18
+                    height: 18
+                    name: "chevron-right"
+                    darkMode: theme.darkMode
+                }
+
+                onClicked: root.moveRoom(1)
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                anchors.leftMargin: 42
+                anchors.rightMargin: 42
+                property real startX: 0
+                onPressed: startX = mouse.x
+                onReleased: {
+                    var delta = mouse.x - startX
+                    if (Math.abs(delta) > 30)
+                        root.moveRoom(delta < 0 ? 1 : -1)
+                }
+            }
+        }
+
+        GlassPanel {
+            width: root.voicePanelWidth
+            height: 52
+            y: 4
+            visible: !root.compactHeader
+            theme: root.dashboardTheme
+            radius: theme.radiusLg
+            padding: 0
+            active: root.voicePipelineActive
+
+            Row {
+                anchors.centerIn: parent
+                width: parent.width - 18
+                spacing: 7
+
+                Rectangle {
+                    width: 9
+                    height: 9
+                    radius: 5
+                    color: root.voicePipelineActive ? theme.accentGreen : theme.textDisabled
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                    width: parent.width - 16
+                    text: root.voiceStatusText
+                    color: theme.textPrimary
+                    font.family: theme.family()
+                    font.pixelSize: 10
+                    font.bold: true
+                    elide: Text.ElideRight
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+        }
+
+        GlassPanel {
+            width: root.timePanelWidth
+            height: 52
+            y: 4
+            theme: root.dashboardTheme
+            radius: theme.radiusLg
+            padding: 0
+
+            Column {
+                anchors.centerIn: parent
+                width: parent.width
+                spacing: 0
+
+                Text {
+                    width: parent.width
+                    text: root.timeText
+                    color: theme.textPrimary
+                    font.family: theme.family()
+                    font.pixelSize: root.compactHeader ? 13 : 14
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    width: parent.width
+                    text: root.dateText
+                    color: theme.textMuted
+                    font.family: theme.family()
+                    font.pixelSize: 10
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                }
+            }
+        }
+
+        ThemeToggle {
+            width: root.togglePanelWidth
+            height: 26
+            y: 17
+            theme: root.dashboardTheme
+            checked: !theme.darkMode
+            onToggled: root.themeModeRequested(!root.darkMode)
+        }
+    }
+
+    Flickable {
+        id: controlsFlick
+        x: root.contentLeft
+        y: root.mainTop
+        width: root.gridWidth
+        height: root.mainHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        contentWidth: width
+        contentHeight: Math.max(height, deviceGrid.y + deviceGrid.implicitHeight + 8)
+
+        Text {
+            x: 1
+            y: 0
+            text: "Controls"
+            color: theme.textPrimary
+            font.family: theme.family()
+            font.pixelSize: 16
+            font.bold: true
+        }
+
+        Text {
+            x: 78
+            y: 4
+            width: parent.width - 78
+            text: root.selectedDevices.length ? root.selectedDevices.length + " smart devices" : "Waiting for rooms"
+            color: theme.textMuted
+            font.family: theme.family()
+            font.pixelSize: 11
+            elide: Text.ElideRight
+        }
+
+        Grid {
+            id: deviceGrid
+            x: 0
+            y: 30
+            width: parent.width
+            columns: root.gridColumns
+            rowSpacing: root.gap
+            columnSpacing: root.gap
+
+            Repeater {
+                model: root.selectedDevices
+
+                DeviceCard {
+                    width: root.cardWidth
+                    height: root.cardHeight
+                    theme: root.dashboardTheme
+                    deviceName: modelData.name
+                    meta: modelData.meta
+                    statusText: modelData.status
+                    deviceType: modelData.type
+                    deviceActive: modelData.active
+                    actionable: modelData.actionable
+                    hasLevel: modelData.hasLevel
+                    levelValue: modelData.level
+                    rawDevice: modelData.raw
+                    onActivated: function(rawDevice) { root.deviceActionRequested(rawDevice) }
+                    onLevelRequested: function(rawDevice, value) { root.requestLevel(rawDevice, value) }
+                }
+            }
+        }
+
+        GlassPanel {
+            x: 0
+            y: 30
+            width: parent.width
+            height: Math.min(160, parent.height - 30)
+            visible: root.selectedDevices.length === 0
+            theme: root.dashboardTheme
+            radius: theme.radiusXl
+            padding: 0
+
+            Column {
+                anchors.centerIn: parent
+                width: parent.width - 40
+                spacing: 8
+
+                SvgIcon {
+                    width: 28
+                    height: 28
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    name: "house"
+                    darkMode: theme.darkMode
+                }
+
+                Text {
+                    width: parent.width
+                    text: root.effectiveRooms.length ? "No devices in this room" : "No Home Assistant rooms"
+                    color: theme.textPrimary
+                    font.family: theme.family()
+                    font.pixelSize: 15
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    width: parent.width
+                    text: "Controls appear here after discovery"
+                    color: theme.textMuted
+                    font.family: theme.family()
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                }
+            }
+        }
+    }
+
+    Column {
+        x: root.contentLeft + root.gridWidth + root.gap
+        y: root.mainTop
+        width: root.sideWidth
+        height: root.mainHeight
+        spacing: root.gap
+        visible: root.sideRailVisible
+
+        RoomSummaryPanel {
+            width: parent.width
+            height: 134
+            theme: root.dashboardTheme
+            roomName: root.roomName()
+            imageSource: root.roomImageFor(root.selectedRoom)
+            activeCount: root.activeDeviceCount()
+            deviceCount: root.selectedDevices.length
+        }
+
+        WeatherEnvironmentPanel {
+            width: parent.width
+            height: 126
+            theme: root.dashboardTheme
+            environment: root.environmentFromDevices(root.selectedDevices)
+        }
+
+        MediaPlayerPanel {
+            width: parent.width
+            height: 82
+            theme: root.dashboardTheme
+            connected: root.mediaConnected
+            playing: root.mediaPlaying
+            title: root.mediaTitle
+            artist: root.mediaArtist
+            album: root.mediaAlbum
+            albumArtUrl: root.mediaArtUrl
+            onMediaAction: function(action) { root.mediaActionRequested(action) }
+        }
+    }
+
     function updateClock() {
         var now = new Date()
         var hours = now.getHours()
@@ -92,14 +461,20 @@ Item {
         var hour12 = hours % 12
         if (hour12 === 0)
             hour12 = 12
-        timeText = (hour12 < 10 ? "0" : "") + hour12 + ":" + (minutes < 10 ? "0" : "") + minutes + " " + suffix
+        timeText = hour12 + ":" + (minutes < 10 ? "0" : "") + minutes + " " + suffix
         var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         dateText = days[now.getDay()] + ", " + now.getDate() + " " + months[now.getMonth()]
     }
 
-    function setRoomIndex(index) {
-        currentRoomIndex = Math.max(0, Math.min(index, effectiveRooms.length - 1))
+    function roomName() {
+        return selectedRoom && selectedRoom.name ? selectedRoom.name : "No Rooms"
+    }
+
+    function moveRoom(delta) {
+        if (!effectiveRooms || effectiveRooms.length === 0)
+            return
+        currentRoomIndex = (safeRoomIndex + delta + effectiveRooms.length) % effectiveRooms.length
         if (selectedRoom && selectedRoom.id)
             roomSelected(selectedRoom.id)
     }
@@ -110,15 +485,29 @@ Item {
             var device = input[i]
             out.push({
                 name: device.name || "Device",
-                meta: device.meta || device.type || device.room_name || "Smart device",
+                meta: deviceMeta(device),
                 status: statusFor(device),
                 type: typeFor(device),
                 active: activeFor(device),
                 actionable: actionableFor(device),
+                hasLevel: hasLevelFor(device),
+                level: levelFor(device),
                 raw: device
             })
         }
         return out
+    }
+
+    function deviceMeta(device) {
+        if (!device)
+            return "Smart device"
+        if (device.room_name && device.type)
+            return device.room_name + " - " + device.type
+        return device.room_name || device.type || "Smart device"
+    }
+
+    function hasCapability(device, capability) {
+        return !!(device && device.capabilities && device.capabilities.indexOf(capability) !== -1)
     }
 
     function typeFor(device) {
@@ -142,6 +531,8 @@ Item {
             return "purifier"
         if (raw.indexOf("weather") !== -1)
             return "weather"
+        if (raw.indexOf("plug") !== -1 || raw.indexOf("socket") !== -1 || raw.indexOf("outlet") !== -1)
+            return "plug"
         if (raw.indexOf("sensor") !== -1 || klass.length > 0)
             return "sensor"
         return "switch"
@@ -156,14 +547,21 @@ Item {
     function actionableFor(device) {
         if (!device)
             return false
-        var typeName = typeFor(device)
-        return !!device.state || typeName === "switch" || typeName === "light" || typeName === "fan" || typeName === "ac" || typeName === "speaker" || typeName === "camera"
+        if (!device.state || device.state.state === "unknown" || device.state.state === "unavailable" || device.state.state === "offline" || device.state.state === "unreachable")
+            return false
+        return hasCapability(device, "toggle")
+            || hasCapability(device, "brightness")
+            || hasCapability(device, "percentage")
+            || hasCapability(device, "color_temperature")
+            || hasCapability(device, "color")
     }
 
     function statusFor(device) {
         if (device && device.status)
             return device.status
         if (device && device.state) {
+            if (device.state.is_on === false)
+                return "Off"
             if (device.state.brightness !== undefined && device.state.brightness !== null)
                 return Math.round(device.state.brightness) + "%"
             if (device.state.percentage !== undefined && device.state.percentage !== null)
@@ -173,6 +571,48 @@ Item {
             return device.state.is_on ? "On" : "Off"
         }
         return "Ready"
+    }
+
+    function hasLevelFor(device) {
+        return !!(device && device.state && (hasCapability(device, "brightness") || hasCapability(device, "percentage") || device.state.brightness !== undefined || device.state.percentage !== undefined))
+    }
+
+    function levelFor(device) {
+        if (!device || !device.state)
+            return 0
+        if (device.state.brightness !== undefined && device.state.brightness !== null)
+            return Math.max(0, Math.min(100, Number(device.state.brightness)))
+        if (device.state.percentage !== undefined && device.state.percentage !== null)
+            return Math.max(0, Math.min(100, Number(device.state.percentage)))
+        return device.state.is_on ? 100 : 0
+    }
+
+    function requestLevel(device, value) {
+        if (!device)
+            return
+        if (hasCapability(device, "brightness") || (device.state && device.state.brightness !== undefined)) {
+            deviceSetRequested(device, { brightness: value })
+            return
+        }
+        deviceSetRequested(device, { percentage: value })
+    }
+
+    function activeDeviceCount() {
+        var count = 0
+        for (var i = 0; i < selectedDevices.length; i++) {
+            if (selectedDevices[i].active)
+                count++
+        }
+        return count
+    }
+
+    function countActive(typeName) {
+        var count = 0
+        for (var i = 0; i < selectedDevices.length; i++) {
+            if (selectedDevices[i].type === typeName && selectedDevices[i].active)
+                count++
+        }
+        return count
     }
 
     function environmentFromDevices(devices) {
@@ -197,15 +637,6 @@ Item {
         return env
     }
 
-    function camerasFor(devices) {
-        var out = []
-        for (var i = 0; i < devices.length; i++) {
-            if (devices[i].type === "camera")
-                out.push({ name: devices[i].name, status: devices[i].active ? "Live" : "Offline" })
-        }
-        return out
-    }
-
     function roomImageFor(room) {
         var name = String(room && room.name ? room.name : "").toLowerCase()
         if (name.indexOf("bath") !== -1)
@@ -220,78 +651,105 @@ Item {
             return "qrc:/assets/images/kitchen.jpg"
         if (name.indexOf("living") !== -1 || name.indexOf("hall") !== -1 || name.indexOf("lounge") !== -1)
             return "qrc:/assets/images/living_room.jpg"
-        return "qrc:/assets/images/room-" + ((Math.max(0, root.currentRoomIndex) % 3) + 1) + ".jpg"
+        return "qrc:/assets/images/room-" + ((Math.max(0, root.safeRoomIndex) % 3) + 1) + ".jpg"
     }
 
-    RoomHeader {
-        x: root.contentX
-        y: root.topMargin
-        width: root.contentWidth
-        height: root.headerHeight
-        theme: theme
-        rooms: root.effectiveRooms
-        currentRoomIndex: root.currentRoomIndex
-        deviceCount: root.selectedDevices.length
-        timeText: root.timeText
-        dateText: root.dateText
-        voicePipelineActive: root.voicePipelineActive
-        voiceStatusText: root.voiceStatusText
-        onRoomSelected: function(index) { root.setRoomIndex(index) }
-        onThemeRequested: root.themeModeRequested(!root.darkMode)
-    }
+    component RoomSummaryPanel: GlassPanel {
+        id: summary
 
-    RoomHeroPanel {
-        x: root.contentX
-        y: root.mainTop
-        width: root.leftColumnWidth
-        height: root.heroHeight
-        theme: theme
-        roomName: root.selectedRoom && root.selectedRoom.name ? root.selectedRoom.name : "No Room"
-        roomImageSource: root.roomImageFor(root.selectedRoom)
-        devices: root.selectedDevices
-    }
+        property string roomName: ""
+        property string imageSource: ""
+        property int activeCount: 0
+        property int deviceCount: 0
 
-    WeatherEnvironmentPanel {
-        x: root.contentX + root.leftColumnWidth + root.contentGap
-        y: root.mainTop
-        width: root.rightColumnWidth
-        height: root.weatherHeight
-        theme: theme
-        environment: root.environmentFromDevices(root.selectedDevices)
-    }
+        radius: theme.radiusXl
+        padding: 0
+        active: activeCount > 0
+        clip: true
 
-    CameraLivePanel {
-        x: root.contentX + root.leftColumnWidth + root.contentGap
-        y: root.cameraTop
-        width: root.rightColumnWidth
-        height: root.cameraHeight
-        theme: theme
-        cameras: root.camerasFor(root.selectedDevices)
-    }
+        Image {
+            anchors.fill: parent
+            source: summary.imageSource
+            fillMode: Image.PreserveAspectCrop
+            opacity: theme.darkMode ? 0.42 : 0.68
+            asynchronous: true
+            smooth: true
+        }
 
-    DevicePager {
-        x: root.contentX
-        y: root.pagerTop
-        width: root.leftColumnWidth
-        height: root.pagerHeight
-        theme: theme
-        roomId: root.selectedRoom && root.selectedRoom.id ? root.selectedRoom.id : ""
-        devices: root.selectedDevices
-        onDeviceActivated: function(rawDevice) { root.deviceActionRequested(rawDevice) }
-    }
+        Rectangle {
+            anchors.fill: parent
+            color: theme.darkMode ? "#99111113" : "#45FFFFFF"
+        }
 
-    MediaPlayerPanel {
-        x: root.contentX + root.leftColumnWidth + root.contentGap
-        y: root.mediaTop
-        width: root.rightColumnWidth
-        height: root.mediaHeight
-        theme: theme
-        connected: root.mediaConnected
-        playing: root.mediaPlaying
-        title: root.mediaTitle
-        artist: root.mediaArtist
-        album: root.mediaAlbum
-        albumArtUrl: root.mediaArtUrl
-        onMediaAction: function(action) { root.mediaActionRequested(action) }
+        Column {
+            x: 14
+            y: 14
+            width: parent.width - 28
+            spacing: 4
+
+            Text {
+                width: parent.width
+                text: summary.roomName
+                color: theme.textPrimary
+                font.family: theme.family()
+                font.pixelSize: 17
+                font.bold: true
+                elide: Text.ElideRight
+            }
+
+            Text {
+                width: parent.width
+                text: summary.activeCount + " active of " + summary.deviceCount
+                color: theme.textSecondary
+                font.family: theme.family()
+                font.pixelSize: 11
+                font.bold: true
+                elide: Text.ElideRight
+            }
+        }
+
+        Row {
+            x: 14
+            y: parent.height - 42
+            spacing: 8
+
+            Repeater {
+                model: [
+                    { icon: "lightbulb", value: root.countActive("light") },
+                    { icon: "fan", value: root.countActive("fan") },
+                    { icon: "plug", value: root.countActive("plug") + root.countActive("switch") }
+                ]
+
+                Rectangle {
+                    width: 46
+                    height: 28
+                    radius: 14
+                    color: theme.darkMode ? "#33FFFFFF" : "#CCFFFFFF"
+                    border.width: 1
+                    border.color: theme.darkMode ? "#24FFFFFF" : "#80FFFFFF"
+
+                    SvgIcon {
+                        x: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 14
+                        height: 14
+                        name: modelData.icon
+                        darkMode: theme.darkMode
+                    }
+
+                    Text {
+                        x: 26
+                        width: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.value
+                        color: theme.textPrimary
+                        font.family: theme.family()
+                        font.pixelSize: 11
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                }
+            }
+        }
     }
 }

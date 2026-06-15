@@ -253,6 +253,9 @@ class FakeStateRegistry:
     def all_rooms(self):
         return [Room(id="living_room", name="Living Room", devices=[self.device] if self.device else [])]
 
+    def visible_rooms(self):
+        return self.all_rooms()
+
 
 class FakeWebsocketManager:
     def __init__(self) -> None:

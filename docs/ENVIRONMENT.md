@@ -121,14 +121,24 @@ Security:
 | `VOICE_COMMAND_MIN_SECONDS` | Optional | `1.2` | Minimum record time before silence cutoff. |
 | `VOICE_COMMAND_SILENCE_SECONDS` | Optional | `1.1` | Silence duration before ending capture. |
 | `VOICE_COMMAND_SILENCE_RMS` | Optional | `450` | RMS threshold for voice activity. |
+| `VOICE_WAKE_COOLDOWN_SECONDS` | Optional | `2.5` | Rejects wake detections too soon after a turn or playback. |
+| `VOICE_POST_SPEECH_COOLDOWN_SECONDS` | Optional | `0.8` | Extra mic pause after local or assistant speech before wake listening resumes. |
+| `VOICE_WAKE_MIN_RMS` | Optional | `350` | Minimum recent RMS required to accept a Porcupine wake hit. |
+| `VOICE_WAKE_MIN_PEAK_RMS` | Optional | `650` | Minimum recent peak RMS required to accept a Porcupine wake hit. |
+| `VOICE_WAKE_RMS_WINDOW_FRAMES` | Optional | `8` | Number of wake-listening frames used for recent energy checks. |
+| `VOICE_AUDIO_QUEUE_MAX_CHUNKS` | Optional | `64` | Bounds mic buffering so stale audio cannot build up indefinitely. |
+| `VOICE_AUDIO_FRAME_TIMEOUT_SECONDS` | Optional | `5` | Fails a turn if microphone frames stop arriving. |
 | `VOICE_FEEDBACK_ENABLED` | Optional | `1` | Enables local wake/error feedback speech. |
 | `VOICE_FEEDBACK_WAKE_TEXT` | Optional | `How can I help you sir?` | Wake feedback text. |
 | `VOICE_FEEDBACK_MISUNDERSTOOD_TEXT` | Optional | `I am afraid sir, but I didnt get you` | No-command text. |
 | `VOICE_TTS_COMMAND` | Optional | `espeak-ng` | Simple feedback TTS command. |
 | `VOICE_TTS_RATE` | Optional | `150` | Simple feedback TTS rate. |
+| `VOICE_TTS_FALLBACK_ENABLED` | Optional | `1` | Allows command TTS fallback only after the configured TTS API fails. |
+| `VOICE_TTS_FALLBACK_TIMEOUT_SECONDS` | Optional | `8` | Timeout for command TTS fallback. |
 | `PORCUPINE_API_KEY` | Required for wake word | `...` | Picovoice access key. Sensitive. |
 | `PORCUPINE_ACCESS_KEY` | Optional | `...` | Alias fallback for Picovoice key. |
 | `PORCUPINE_KEYWORD_PATH` | Required | `/wake-word/Jarvis_en_raspberry-pi_v4_0_0.ppn` | Wake-word model path. |
+| `PORCUPINE_SENSITIVITY` | Optional | `0.35` | Porcupine sensitivity. Lower values reduce false wake-ups. |
 | `WHISPER_MODEL` | Optional | `base.en` | faster-whisper model. |
 | `WHISPER_LANGUAGE` | Optional | `en` | STT language. |
 | `WHISPER_DEVICE` | Optional | `cpu` | faster-whisper device. |

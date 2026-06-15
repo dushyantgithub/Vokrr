@@ -65,13 +65,16 @@ qt_add_resources(vokrr-qt vokrr_assets
         assets/icons/lucide/cloud.svg
         assets/icons/lucide/droplets.svg
         assets/icons/lucide/fan.svg
+        assets/icons/lucide/house.svg
         assets/icons/lucide/lightbulb.svg
         assets/icons/lucide/moon.svg
         assets/icons/lucide/music.svg
         assets/icons/lucide/panels-top-left.svg
         assets/icons/lucide/pause.svg
         assets/icons/lucide/play.svg
+        assets/icons/lucide/plug.svg
         assets/icons/lucide/power.svg
+        assets/icons/lucide/settings.svg
         assets/icons/lucide/skip-back.svg
         assets/icons/lucide/skip-forward.svg
         assets/icons/lucide/snowflake.svg
@@ -91,13 +94,16 @@ qt_add_resources(vokrr-qt vokrr_assets
         assets/icons/lucide-white/cloud.svg
         assets/icons/lucide-white/droplets.svg
         assets/icons/lucide-white/fan.svg
+        assets/icons/lucide-white/house.svg
         assets/icons/lucide-white/lightbulb.svg
         assets/icons/lucide-white/moon.svg
         assets/icons/lucide-white/music.svg
         assets/icons/lucide-white/panels-top-left.svg
         assets/icons/lucide-white/pause.svg
         assets/icons/lucide-white/play.svg
+        assets/icons/lucide-white/plug.svg
         assets/icons/lucide-white/power.svg
+        assets/icons/lucide-white/settings.svg
         assets/icons/lucide-white/skip-back.svg
         assets/icons/lucide-white/skip-forward.svg
         assets/icons/lucide-white/snowflake.svg
@@ -107,24 +113,6 @@ qt_add_resources(vokrr-qt vokrr_assets
         assets/icons/lucide-white/tv.svg
         assets/icons/lucide-white/volume-2.svg
         assets/icons/lucide-white/wind.svg
-        assets/icons/tab-dashboard.svg
-        assets/icons/tab-dashboard-active.svg
-        assets/icons/tab-devices.svg
-        assets/icons/tab-devices-active.svg
-        assets/icons/tab-settings.svg
-        assets/icons/tab-settings-active.svg
-        assets/icons/tab-white/tab-dashboard.svg
-        assets/icons/tab-white/tab-dashboard-active.svg
-        assets/icons/tab-white/tab-devices.svg
-        assets/icons/tab-white/tab-devices-active.svg
-        assets/icons/tab-white/tab-settings.svg
-        assets/icons/tab-white/tab-settings-active.svg
-        assets/icons/tab-black/tab-dashboard.svg
-        assets/icons/tab-black/tab-dashboard-active.svg
-        assets/icons/tab-black/tab-devices.svg
-        assets/icons/tab-black/tab-devices-active.svg
-        assets/icons/tab-black/tab-settings.svg
-        assets/icons/tab-black/tab-settings-active.svg
         assets/icons/back.svg
         assets/icons/back-black.svg
         assets/icons/cpu-architecture-vokrr.svg

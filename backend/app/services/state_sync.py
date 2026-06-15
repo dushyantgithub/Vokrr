@@ -5,7 +5,7 @@ from contextlib import suppress
 
 from app.domain.models import Device
 from app.services.home_assistant import HomeAssistantClient
-from app.services.registry import DeviceRegistry, is_excluded_entity
+from app.services.registry import DeviceRegistry, device_is_visible_controllable, is_excluded_entity
 from app.services.websocket_manager import WebSocketManager
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,9 @@ class StateSyncService:
 
     async def reconcile_once(self, broadcast: bool = True) -> None:
         seen_entity_ids: set[str] = set()
-        for entity in await self.ha_client.states():
+        states = await self.ha_client.states()
+        logger.info("device.raw provider=home_assistant states=%s", len(states))
+        for entity in states:
             seen_entity_ids.add(entity["entity_id"])
             self.registry.update_from_ha_state(
                 entity_id=entity["entity_id"],
@@ -55,7 +57,7 @@ class StateSyncService:
         if broadcast:
             await self.websocket_manager.broadcast(
                 "snapshot",
-                {"rooms": [room.model_dump() for room in self.registry.all_rooms()]},
+                {"rooms": [room.model_dump() for room in self.registry.visible_rooms()]},
             )
 
     async def _reconcile_loop(self) -> None:
@@ -77,13 +79,24 @@ class StateSyncService:
             if not new_state:
                 continue
 
+            device_id = self.registry.entity_to_device_id.get(new_state["entity_id"])
+            previous_device = self.registry.get_device(device_id) if device_id else None
+            was_visible = (
+                device_is_visible_controllable(previous_device) if previous_device else False
+            )
             device = self.registry.update_from_ha_state(
                 entity_id=new_state["entity_id"],
                 state=new_state["state"],
                 attributes=new_state.get("attributes", {}),
             )
-            if device:
+            is_visible = device_is_visible_controllable(device) if device else False
+            if device and is_visible:
                 await self.websocket_manager.broadcast("device.updated", device.model_dump())
+            elif device and was_visible != is_visible:
+                await self.websocket_manager.broadcast(
+                    "snapshot",
+                    {"rooms": [room.model_dump() for room in self.registry.visible_rooms()]},
+                )
             elif self._should_discover_from_state(new_state):
                 self._schedule_discovery()
 
@@ -121,7 +134,7 @@ class StateSyncService:
             await self.reconcile_once(broadcast=False)
             await self.websocket_manager.broadcast(
                 "snapshot",
-                {"rooms": [room.model_dump() for room in self.registry.all_rooms()]},
+                {"rooms": [room.model_dump() for room in self.registry.visible_rooms()]},
             )
         except Exception:
             logger.exception("Home Assistant device discovery failed")

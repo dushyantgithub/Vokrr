@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import sqlite3
 import uuid
@@ -12,7 +13,6 @@ from app.domain.models import (
     Capability,
     Device,
     DeviceImportRequest,
-    DeviceState,
     DeviceType,
     OnboardingCandidate,
     OnboardingIntegration,
@@ -20,7 +20,15 @@ from app.domain.models import (
     OnboardingSnapshotResponse,
 )
 from app.services.home_assistant import HomeAssistantClient
-from app.services.registry import DeviceRegistry, is_excluded_entity, normalize_state
+from app.services.registry import (
+    DeviceRegistry,
+    device_visibility_reasons,
+    is_excluded_entity,
+    normalize_state,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> str:
@@ -355,6 +363,17 @@ class OnboardingService:
         states = await self.ha_client.states()
         registry_rows = await self.ha_client.entity_registry_for_display()
         area_names, device_area_ids = await self._ha_area_context()
+        platform_counts: dict[str, int] = {}
+        for row in registry_rows:
+            platform = str(row.get("platform") or row.get("pl") or "unknown")
+            platform_counts[platform] = platform_counts.get(platform, 0) + 1
+        logger.info(
+            "device.raw provider=home_assistant states=%s registry_rows=%s platforms=%s tuya_rows=%s",
+            len(states),
+            len(registry_rows),
+            platform_counts,
+            platform_counts.get("tuya", 0),
+        )
 
         state_by_entity_id = {row["entity_id"]: row for row in states if "entity_id" in row}
         imported = self.repository.list_imported_devices()
@@ -414,6 +433,34 @@ class OnboardingService:
             ha_device_id = _row_device_id(row)
             area_id = (device_area_ids.get(ha_device_id) if ha_device_id else None) or _row_area_id(row)
             area_name = area_names.get(area_id) if area_id else None
+            display_name = _display_name(entity_id, row, attributes, area_name)
+            device_type = infer_device_type(entity_id, attributes)
+            capabilities = infer_capabilities(entity_id, attributes)
+            device_state = normalize_state(str(state_row.get("state", "unknown")), attributes)
+            probe = Device(
+                id=entity_id,
+                name=display_name,
+                type=device_type,
+                entity_id=entity_id,
+                room_id=area_id or "",
+                room_name=area_name or "",
+                source="discovered",
+                ha_device_id=ha_device_id,
+                entity_ids=[entity_id],
+                capabilities=capabilities,
+                state=device_state,
+            )
+            filter_reasons = device_visibility_reasons(probe)
+            if filter_reasons:
+                logger.info(
+                    "device.filtered id=%s entity_id=%s source=discovered room=%s reason=%s",
+                    entity_id,
+                    entity_id,
+                    area_id or "",
+                    "; ".join(filter_reasons),
+                )
+                continue
+
             group_key = entity_id
             candidate = grouped.setdefault(
                 group_key,
@@ -422,15 +469,15 @@ class OnboardingService:
                     "entity_id": entity_id,
                     "entity_ids": [],
                     "ha_device_id": ha_device_id,
-                    "name": _display_name(entity_id, row, attributes, area_name),
+                    "name": display_name,
                     "domain": domain,
                     "platform": row.get("platform") or row.get("pl"),
                     "area_id": area_id,
                     "room_id": None,
                     "room_name": area_name,
-                    "type": infer_device_type(entity_id, attributes),
-                    "capabilities": infer_capabilities(entity_id, attributes),
-                    "state": normalize_state(str(state_row.get("state", "unknown")), attributes),
+                    "type": device_type,
+                    "capabilities": capabilities,
+                    "state": device_state,
                     "already_imported": False,
                     "existing_device_id": None,
                 },

@@ -44,7 +44,10 @@ class NvidiaMagpieTTSService:
             "NVIDIA_TTS_FUNCTION_ID",
             "877104f7-e885-42b9-8de8-f6e4c6303969",
         )
-        self.voice = voice or os.getenv("NVIDIA_TTS_DEFAULT_VOICE", "Magpie-Multilingual.EN-US.Aria")
+        self.voice = voice or os.getenv(
+            "NVIDIA_TTS_DEFAULT_VOICE",
+            "Magpie-Multilingual.EN-US.Aria",
+        )
         self.language_code = language_code or os.getenv("NVIDIA_TTS_LANGUAGE_CODE", "en-US")
         self.sample_rate_hz = sample_rate_hz or int(os.getenv("NVIDIA_TTS_SAMPLE_RATE_HZ", "44100"))
 
@@ -81,6 +84,7 @@ class NvidiaMagpieTTSService:
         service = riva.client.SpeechSynthesisService(auth)
 
         try:
+            audio_bytes = 0
             with wave.open(str(output_path), "wb") as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
@@ -93,9 +97,15 @@ class NvidiaMagpieTTSService:
                     encoding=AudioEncoding.LINEAR_PCM,
                 )
                 for response in responses:
+                    chunk = bytes(response.audio or b"")
+                    if not chunk:
+                        continue
                     if first_audio_ms is None:
                         first_audio_ms = (time.perf_counter() - started) * 1000
-                    wav_file.writeframesraw(response.audio)
+                    audio_bytes += len(chunk)
+                    wav_file.writeframesraw(chunk)
+                if audio_bytes <= 0:
+                    raise TTSError("NVIDIA Magpie TTS returned no audio")
         except Exception:
             output_path.unlink(missing_ok=True)
             raise

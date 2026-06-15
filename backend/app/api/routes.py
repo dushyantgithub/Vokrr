@@ -431,6 +431,10 @@ async def set_room(
             request=request,
             details={"room_id": room_id, "reason": str(exc)},
         )
+        await state.websocket_manager.broadcast(
+            "snapshot",
+            {"rooms": [room.model_dump() for room in state.device_service.rooms()]},
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
@@ -543,6 +547,10 @@ async def toggle(
             request=request,
             details={"device_id": device_id, "reason": str(exc)},
         )
+        await state.websocket_manager.broadcast(
+            "snapshot",
+            {"rooms": [room.model_dump() for room in state.device_service.rooms()]},
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
@@ -577,6 +585,10 @@ async def set_device(
             user=user,
             request=request,
             details={"device_id": device_id, "reason": str(exc)},
+        )
+        await state.websocket_manager.broadcast(
+            "snapshot",
+            {"rooms": [room.model_dump() for room in state.device_service.rooms()]},
         )
         raise HTTPException(status_code=400, detail=str(exc)) from None
 

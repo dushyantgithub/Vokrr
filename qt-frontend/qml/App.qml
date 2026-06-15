@@ -11,7 +11,7 @@ import "roomfinal" as RoomFinal
 ApplicationWindow {
     id: app
     visible: true
-    width: 640
+    width: 800
     height: 480
     minimumWidth: 640
     minimumHeight: 480
@@ -26,7 +26,7 @@ ApplicationWindow {
     property var scenes: []
     property var health: null
     property string healthError: ""
-    property string activeView: "Dashboard"
+    property string activeView: "Home"
     property string selectedRoomId: ""
     property string assistantStatus: "idle"
     property string assistantMessage: "waiting for wake-word"
@@ -64,17 +64,14 @@ ApplicationWindow {
     property int realtimeReconnectDelay: 1000
     property int realtimeReconnectMaxDelay: 15000
     readonly property int appNavigatorWidth: 64
-    readonly property int appNavigatorHeight: 254
+    readonly property int appNavigatorHeight: 148
     readonly property int appNavigatorLeftMargin: 8
     readonly property int appContentGap: 12
     readonly property int appContentLeftInset: appNavigatorLeftMargin + appNavigatorWidth + appContentGap
 
     readonly property var navItems: [
-        { key: "Dashboard", label: "Dashboard", icon: "H" },
-        { key: "Devices", label: "Devices", icon: "D" },
-        { key: "Routines", label: "Routines", icon: "R" },
-        { key: "Activity", label: "Activity", icon: "A" },
-        { key: "Settings", label: "Settings", icon: "S" }
+        { key: "Home", label: "Home", icon: "house" },
+        { key: "Settings", label: "Settings", icon: "settings" }
     ]
     readonly property var statusLabels: ({
         idle: "waiting for wake-word",
@@ -93,6 +90,16 @@ ApplicationWindow {
     readonly property string voicePipelineLabel: voicePipelineActive
         ? "waiting for command"
         : "waiting for wake-word"
+
+    function normalizeView(viewName) {
+        if (viewName === "Settings")
+            return "Settings"
+        return "Home"
+    }
+
+    function setActiveView(viewName) {
+        activeView = normalizeView(viewName)
+    }
 
     function hasCapability(device, capability) {
         return device && device.capabilities && device.capabilities.indexOf(capability) !== -1
@@ -312,7 +319,7 @@ ApplicationWindow {
         rooms = []
         scenes = []
         selectedRoomId = ""
-        activeView = "Dashboard"
+        activeView = "Home"
     }
 
     function loadSnapshot() {
@@ -506,6 +513,8 @@ ApplicationWindow {
     function mergeDevice(updated) {
         if (!updated)
             return false
+        if (!isVisibleControlDevice(updated))
+            return removeDevice(updated)
         var nextRooms = JSON.parse(JSON.stringify(rooms))
         var changed = false
         for (var i = 0; i < nextRooms.length; i++) {
@@ -525,6 +534,41 @@ ApplicationWindow {
         return changed
     }
 
+    function isVisibleControlDevice(device) {
+        if (!device || !device.state || !device.capabilities)
+            return false
+        if (device.state.state === "unknown" || device.state.state === "unavailable" || device.state.state === "offline" || device.state.state === "unreachable")
+            return false
+        return device.capabilities.indexOf("toggle") !== -1
+            || device.capabilities.indexOf("brightness") !== -1
+            || device.capabilities.indexOf("percentage") !== -1
+            || device.capabilities.indexOf("color_temperature") !== -1
+            || device.capabilities.indexOf("color") !== -1
+    }
+
+    function removeDevice(device) {
+        var nextRooms = JSON.parse(JSON.stringify(rooms))
+        var changed = false
+        for (var i = 0; i < nextRooms.length; i++) {
+            var devices = nextRooms[i].devices || []
+            var kept = []
+            for (var j = 0; j < devices.length; j++) {
+                var current = devices[j]
+                var sameDevice = current.id === device.id
+                var sameEntity = device.entity_id && current.entity_id === device.entity_id
+                if (sameDevice || sameEntity) {
+                    changed = true
+                    continue
+                }
+                kept.push(current)
+            }
+            nextRooms[i].devices = kept
+        }
+        if (changed)
+            rooms = nextRooms
+        return changed
+    }
+
     function mergeDeviceList(updatedDevices) {
         if (!updatedDevices || !updatedDevices.length)
             return
@@ -535,9 +579,9 @@ ApplicationWindow {
     function pollDeviceStates() {
         if (!token)
             return
-        http("GET", "/api/devices", null, function(status, data) {
+        http("GET", "/api/rooms", null, function(status, data) {
             if (status >= 200 && status < 300 && data)
-                mergeDeviceList(data)
+                mergeRoomsSnapshot(data)
         })
     }
 
@@ -609,6 +653,7 @@ ApplicationWindow {
             } else {
                 if (optimistic)
                     mergeDevice(device)
+                loadSnapshot()
                 pushNotification("Device action failed", "error")
             }
         })
@@ -622,6 +667,7 @@ ApplicationWindow {
                 mergeDevice(data)
                 pushNotification(device.name + " updated", "info")
             } else {
+                loadSnapshot()
                 pushNotification("Device action failed", "error")
             }
         })
@@ -694,7 +740,7 @@ ApplicationWindow {
     }
 
     Timer {
-        running: token.length > 0 && activeView === "Dashboard" && !realtimeConnected
+        running: token.length > 0 && activeView === "Home" && !realtimeConnected
         repeat: true
         interval: 7000
         onTriggered: pollDeviceStates()
@@ -719,7 +765,7 @@ ApplicationWindow {
             } else if (event.event === "voice.command") {
                 setAssistant(event.payload.message, event.payload.understood ? "done" : "error")
                 if (event.payload.navigate)
-                    activeView = event.payload.navigate
+                    setActiveView(event.payload.navigate)
             } else if (event.event === "voice.status") {
                 setAssistant(event.payload.message, event.payload.status)
             } else if (event.event === "scene.ran") {
@@ -759,7 +805,7 @@ ApplicationWindow {
 
     Loader {
         anchors.fill: parent
-        active: token.length > 0 && activeView === "Dashboard"
+        active: token.length > 0 && activeView === "Home"
         visible: active
         sourceComponent: roomDashboardComponent
         opacity: startupLoaderVisible ? 0 : 1
@@ -770,58 +816,6 @@ ApplicationWindow {
                 duration: 650
                 easing.type: Easing.InOutQuad
             }
-        }
-    }
-
-    Loader {
-        id: devicesRadarLoader
-
-        property var scannerDevices: allDevices()
-        property var scannerRooms: rooms
-        property bool scannerRefreshing: devicesRefreshing
-
-        anchors.fill: parent
-        anchors.leftMargin: appContentLeftInset
-        active: activeView === "Devices"
-        visible: active
-        source: Qt.resolvedUrl("RadarDemoContent.qml")
-        opacity: startupLoaderVisible ? 0 : 1
-        z: 5
-
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 650
-                easing.type: Easing.InOutQuad
-            }
-        }
-
-        onLoaded: {
-            item.setRooms(scannerRooms)
-            item.darkMode = app.darkMode
-            item.navInset = appContentLeftInset
-            item.refreshing = scannerRefreshing
-            item.deviceClicked.connect(function(device) { toggleDevice(device) })
-            item.deviceSetRequested.connect(function(device, payload) { setDevice(device, payload) })
-            item.refreshRequested.connect(function() { refreshDevicesFromHomeAssistant() })
-        }
-        Connections {
-            target: app
-            function onDarkModeChanged() {
-                if (devicesRadarLoader.item)
-                    devicesRadarLoader.item.darkMode = app.darkMode
-            }
-        }
-        onScannerRoomsChanged: {
-            if (item)
-                item.setRooms(scannerRooms)
-        }
-        onScannerDevicesChanged: {
-            if (item)
-                item.setDevices(scannerDevices)
-        }
-        onScannerRefreshingChanged: {
-            if (item)
-                item.refreshing = scannerRefreshing
         }
     }
 
@@ -851,7 +845,7 @@ ApplicationWindow {
         height: 26
         theme: null
         checked: !app.darkMode
-        visible: token.length > 0 && activeView !== "Dashboard" && !startupLoaderVisible
+        visible: token.length > 0 && activeView === "Settings" && !startupLoaderVisible
         z: 12
         onToggled: app.darkMode = !app.darkMode
     }
@@ -995,6 +989,9 @@ ApplicationWindow {
                 else
                     showToast("No action available")
             }
+            onDeviceSetRequested: function(device, payload) {
+                setDevice(device, payload)
+            }
             onMediaActionRequested: function(action) {
                 spotifyAction(action)
             }
@@ -1049,10 +1046,10 @@ ApplicationWindow {
                         delegate: Button {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 42
-                            text: modelData.icon + "  " + modelData.label
+                            text: modelData.label
                             flat: true
                             highlighted: activeView === modelData.key
-                            onClicked: activeView = modelData.key
+                            onClicked: setActiveView(modelData.key)
                         }
                     }
 
@@ -1107,11 +1104,7 @@ ApplicationWindow {
                 Loader {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    sourceComponent: activeView === "Dashboard" ? dashboardView
-                                   : activeView === "Devices" ? devicesView
-                                   : activeView === "Routines" ? routinesView
-                                   : activeView === "Activity" ? activityView
-                                   : settingsView
+                    sourceComponent: activeView === "Home" ? dashboardView : settingsView
                 }
             }
         }
@@ -1713,8 +1706,7 @@ ApplicationWindow {
         id: rootItem
 
         readonly property var toolbarItems: [
-            { key: "Dashboard", icon: "dashboard" },
-            { key: "Devices", icon: "devices" },
+            { key: "Home", icon: "house" },
             { key: "Settings", icon: "settings" }
         ]
         readonly property int itemCount: toolbarItems.length
@@ -1773,7 +1765,7 @@ ApplicationWindow {
                         height: rootItem.itemHeight
                         iconName: modelData.icon
                         selected: activeView === modelData.key
-                        onClicked: activeView = modelData.key
+                        onClicked: setActiveView(modelData.key)
                     }
                 }
             }
@@ -1787,10 +1779,6 @@ ApplicationWindow {
         property bool selected: false
         signal clicked()
 
-        function iconPath() {
-            return "qrc:/assets/icons/" + (app.darkMode ? "tab-white/" : "tab-black/") + "tab-" + iconName + (selected ? "-active" : "") + ".svg"
-        }
-
         Rectangle {
             anchors.centerIn: parent
             width: parent.width
@@ -1799,15 +1787,20 @@ ApplicationWindow {
             color: pressArea.pressed ? (app.darkMode ? "#14ffffff" : "#14212121") : "transparent"
         }
 
-        Image {
-            id: toolbarIconSource
+        RoomFinal.SvgIcon {
             anchors.centerIn: parent
-            width: 24
-            height: 24
-            source: toolbarTab.iconPath()
-            fillMode: Image.PreserveAspectFit
-            mipmap: true
-            smooth: true
+            width: toolbarTab.selected ? 25 : 23
+            height: toolbarTab.selected ? 25 : 23
+            name: toolbarTab.iconName
+            darkMode: app.darkMode
+
+            Behavior on width {
+                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+            }
+
+            Behavior on height {
+                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+            }
         }
 
         MouseArea {
