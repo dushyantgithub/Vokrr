@@ -36,6 +36,7 @@ qt_add_qml_module(vokrr-qt
         qml/components/app_loader.qml
         qml/components/SocketOn.qml
         qml/components/SocketOff.qml
+        qml/grandtourer/GrandTourerShell.qml
         qml/roomfinal/CameraLivePanel.qml
         qml/roomfinal/DeviceCard.qml
         qml/roomfinal/DevicePager.qml

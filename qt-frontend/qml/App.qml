@@ -6,6 +6,7 @@ import QtQuick.Shapes
 import QtQuick.Effects
 import QtWebSockets
 import "components" as VokrrComponents
+import "grandtourer" as GrandTourer
 import "roomfinal" as RoomFinal
 
 ApplicationWindow {
@@ -856,6 +857,7 @@ ApplicationWindow {
         anchors.verticalCenter: parent.verticalCenter
         width: appNavigatorWidth
         height: appNavigatorHeight
+        visible: token.length > 0 && activeView === "Settings" && !startupLoaderVisible
         opacity: startupLoaderVisible ? 0 : 1
         z: 10
 
@@ -918,8 +920,8 @@ ApplicationWindow {
 
             onLoaded: {
                 item.size = 200
-                item.loaderColor = "#A0373B"
-                item.trackColor = "#71717a"
+                item.loaderColor = "#2ec79a"
+                item.trackColor = "#d9cba8"
                 item.duration = 2000
                 item.running = Qt.binding(function() { return startupLoaderVisible })
             }
@@ -968,16 +970,23 @@ ApplicationWindow {
     Component {
         id: roomDashboardComponent
 
-        RoomFinal.RoomDashboard {
+        GrandTourer.GrandTourerShell {
             rooms: app.rooms
+            scenes: app.scenes
+            health: app.health
+            healthError: app.healthError
+            selectedRoomId: app.selectedRoomId
+            userName: currentUser && currentUser.username ? currentUser.username : "Ronit"
+            realtimeConnected: app.realtimeConnected
             mediaConnected: spotifyConnected && !spotifyNeedsAuth
             mediaPlaying: spotifyPlaybackActive
             mediaTitle: spotifyTrackTitle
             mediaArtist: spotifyArtistName
             mediaAlbum: spotifyAlbumName
             mediaArtUrl: spotifyAlbumArtUrl
-            darkMode: app.darkMode
             voicePipelineActive: app.voicePipelineActive
+            assistantStatus: app.assistantStatus
+            assistantMessage: app.assistantMessage
             voiceStatusText: app.voicePipelineLabel
             onRoomSelected: function(roomId) {
                 if (roomId)
@@ -995,8 +1004,11 @@ ApplicationWindow {
             onMediaActionRequested: function(action) {
                 spotifyAction(action)
             }
-            onThemeModeRequested: function(nextDarkMode) {
-                app.darkMode = nextDarkMode
+            onSceneRequested: function(scene) {
+                runScene(scene)
+            }
+            onSettingsRequested: function() {
+                setActiveView("Settings")
             }
         }
     }
@@ -1551,13 +1563,19 @@ ApplicationWindow {
                 id: camera
                 active: cameraPanel.visible && mediaDevices.videoInputs.length > 0
                 cameraDevice: mediaDevices.defaultVideoInput
-                cameraFormat: cameraPanel.selectedFormat
 
                 Component.onCompleted: cameraPanel.refreshFormat()
                 onCameraDeviceChanged: cameraPanel.refreshFormat()
             }
 
             videoOutput: videoOutput
+        }
+
+        Binding {
+            target: camera
+            property: "cameraFormat"
+            value: cameraPanel.selectedFormat
+            when: cameraPanel.selectedFormat !== null && cameraPanel.selectedFormat !== undefined
         }
 
         Rectangle {
