@@ -40,6 +40,10 @@ The backend filters out noisy entities such as child locks and switch backlights
 
 ## Device Control
 
+Open **Rooms**, select a room, and use the switch on each device card. **All Off** turns off every controllable device in that room. Changes appear immediately while the backend waits for Home Assistant confirmation; a failed command is rolled back and reported.
+
+Color-capable lights show their current color as a swatch. Tap the swatch to choose warm, neutral, cool, or RGB colors and adjust brightness. The card border, swatch, and state label follow the latest selected or reported light color.
+
 Supported device capabilities:
 
 | Capability | What it does |
@@ -67,7 +71,7 @@ State updates arrive through:
 3. Explicit sync after scenes and some device operations.
 4. Startup sync with retries.
 
-The Qt UI receives `snapshot` and `device.updated` events over the backend WebSocket.
+The Qt UI receives `snapshot` and `device.updated` events over the backend WebSocket. It also polls while the realtime connection is recovering.
 
 ## Voice Control
 
@@ -80,7 +84,7 @@ Jarvis
 Flow:
 
 1. Say the wake word.
-2. The voice pill changes from red `waiting for wake-word` to green `waiting for command`.
+2. The Jarvis screen changes from standby to its active listening state.
 3. Speak one command.
 4. The listener records for up to 10 seconds, or stops earlier after silence.
 5. Vokrr executes the command and resets to wake-word mode.
@@ -91,14 +95,9 @@ Examples:
 - "Jarvis, turn off living room fan"
 - "Jarvis, what is the state of bedroom fan"
 
-## Spotify
+## Screen Navigation
 
-If Spotify credentials are configured:
-
-1. Open the Spotify panel in Vokrr.
-2. Start OAuth login.
-3. Complete login in the browser.
-4. Use the Spotify Connect device named `Vokrr`.
+The bottom bar opens Dashboard, Rooms, Health, Jarvis, and Settings. Settings contains wake-word status, theme preference, Home Assistant status, ring status, and display information. The Raspberry Pi kiosk starts fullscreen; on a non-800x480 display the interface scales uniformly without cropping.
 
 ## Troubleshooting Device Mismatch
 
@@ -130,4 +129,3 @@ Health check:
 ```bash
 scripts/health_check.sh
 ```
-

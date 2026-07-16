@@ -97,15 +97,15 @@ Direct cloud-provider integrations should be added only when Home Assistant cann
 2. Add inference in `infer_device_type`.
 3. Add capabilities in `infer_capabilities`.
 4. Add service call behavior in `DeviceService`.
-5. Add UI icon/layout support in `qt-frontend/qml/roomfinal`.
+5. Add UI icon/layout support in `qt-frontend/qml/VokrrGtShell.qml`.
 6. Add voice matching support in `services/ha_service.py` if voice should control it.
 7. Add or update tests.
 
 ## Adding a New UI Screen or Component
 
-1. Add a QML component under `qt-frontend/qml/`.
+1. Add the screen or reusable inline component to `qt-frontend/qml/VokrrGtShell.qml`.
 2. Register the QML file in `qt-frontend/CMakeLists.txt`.
-3. Wire navigation/state in `qt-frontend/qml/App.qml`.
+3. Keep backend, auth, optimistic updates, and WebSocket state in `qt-frontend/qml/App.qml`.
 4. Rebuild:
    ```bash
    cmake --build qt-frontend/build
@@ -113,6 +113,12 @@ Direct cloud-provider integrations should be added only when Home Assistant cann
 5. Run windowed:
    ```bash
    VOKRR_QT_WINDOWED=1 qt-frontend/build/vokrr-qt
+   ```
+6. Render all screens at 800x480 and a smaller viewport:
+   ```bash
+   QT_QPA_PLATFORM=offscreen python qt-frontend/tests/render_shell.py
+   QT_QPA_PLATFORM=offscreen python qt-frontend/tests/render_shell.py --width 640 --height 360
+   QT_QPA_PLATFORM=offscreen python qt-frontend/tests/smoke_shell.py
    ```
 
 ## Coding Conventions
@@ -164,4 +170,3 @@ Manual verification:
 - Restarted backend performs startup sync.
 - Kiosk reconnects WebSocket after backend restart.
 - Voice resets after one command or 10 seconds.
-

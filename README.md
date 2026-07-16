@@ -6,7 +6,7 @@ The current target device is a Raspberry Pi 4B with the official 7-inch DSI touc
 
 ## What Vokrr Does
 
-- Shows rooms, devices, scenes, media, camera preview, network/system status, and voice status on a native touchscreen UI.
+- Shows the GT dashboard, room controls, health, Jarvis, and settings in a native 800x480 touchscreen UI.
 - Controls Home Assistant entities through a Vokrr backend instead of calling Home Assistant directly from clients.
 - Imports discovered Home Assistant entities into a local device registry.
 - Keeps device states fresh through Home Assistant REST/WebSocket updates and periodic reconciliation.
@@ -43,16 +43,9 @@ More detail lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | Development | Linux/macOS for backend docs/tests; Raspberry Pi or Linux with Qt 6 for kiosk |
 | iOS client | Generated Xcode project under `ios/Vokrr` |
 
-## Screenshots
+## Touchscreen UI
 
-No committed screenshots are currently present. Add production screenshots under `docs/assets/screenshots/` and update this section during handoff.
-
-Suggested captures:
-
-- Home dashboard at 800x480
-- Device detail/control screen
-- Voice status pill in idle and active states
-- Settings/onboarding screen
+The kiosk uses a fixed 800x480 design surface that scales uniformly inside the available fullscreen viewport. It contains Dashboard, Rooms, Health, Jarvis, and Settings screens. Room detail supports optimistic on/off updates plus brightness, RGB color, and color-temperature controls when Home Assistant exposes those capabilities.
 
 ## Quick Start
 
@@ -152,6 +145,13 @@ cmake --build qt-frontend/build
 VOKRR_QT_WINDOWED=1 VOKRR_API_BASE=http://localhost:8080 qt-frontend/build/vokrr-qt
 ```
 
+Set `VOKRR_REDUCED_MOTION=1` to disable interface transitions. For local visual regression checks with PySide6 installed:
+
+```bash
+QT_QPA_PLATFORM=offscreen python qt-frontend/tests/render_shell.py
+QT_QPA_PLATFORM=offscreen python qt-frontend/tests/smoke_shell.py
+```
+
 Voice pipeline CLI test:
 
 ```bash
@@ -247,8 +247,8 @@ For detailed fixes, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 - Backend health returns `ok: true`.
 - Home Assistant UI opens and the token can read `/api/states`.
 - Qt kiosk starts fullscreen and touch input maps correctly.
+- Dashboard, Rooms, Health, Jarvis, and Settings stay within the 800x480 viewport.
 - Device toggles update Home Assistant and return to the UI through WebSocket events.
+- Light brightness and selected RGB/color temperature are reflected immediately and reconcile with Home Assistant.
 - Restarting the backend performs the initial HA state sync.
 - Voice listener reports `waiting for wake-word`, wakes on `Jarvis`, listens for one command for up to 10 seconds, then resets.
-- Spotify playback shows either auth-needed state or current playback.
-- Camera panel shows a local camera feed or a clear no-camera message.

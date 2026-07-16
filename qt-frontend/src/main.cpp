@@ -1,5 +1,6 @@
-#include <QGuiApplication>
 #include <QCursor>
+#include <QFontDatabase>
+#include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
@@ -16,11 +17,19 @@ int main(int argc, char *argv[])
 
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName("Vokrr");
+    QGuiApplication::setApplicationVersion("0.4.1");
     QGuiApplication::setOrganizationName("Vokrr");
+
+    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/Vokrr/assets/fonts/Jost-Latin.woff2"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/Vokrr/assets/fonts/IBMPlexMono-Regular.woff2"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/Vokrr/assets/fonts/IBMPlexMono-Medium.woff2"));
 
     QQmlApplicationEngine engine;
     const QString apiBase = qEnvironmentVariable("VOKRR_API_BASE", "http://localhost:8080");
+    const bool reducedMotion = qEnvironmentVariableIsSet("VOKRR_REDUCED_MOTION");
     engine.rootContext()->setContextProperty(QStringLiteral("vokrrBackendApiBase"), apiBase);
+    engine.rootContext()->setContextProperty(QStringLiteral("vokrrReducedMotion"), reducedMotion);
+
     const QUrl url(QStringLiteral("qrc:/qt/qml/Vokrr/qml/App.qml"));
     QObject::connect(
         &engine,
