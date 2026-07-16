@@ -3,9 +3,20 @@ import shutil
 import subprocess
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import HTMLResponse
 
+from app.domain.health import HealthDashboardResponse
 from app.domain.models import (
     ActivityLogEntry,
     AuthSessionResponse,
@@ -218,6 +229,34 @@ async def health(state: AppState = Depends(get_app_state)) -> dict:
     except Exception as exc:
         ha = {"ok": False, "error": str(exc)}
     return {"ok": True, "home_assistant": ha}
+
+
+@router.get("/api/health/dashboard", response_model=HealthDashboardResponse)
+async def health_dashboard(
+    response: Response,
+    days: int = Query(default=1),
+    actor: AuthenticatedUser = Depends(require_admin),
+    state: AppState = Depends(get_app_state),
+) -> HealthDashboardResponse:
+    _ = actor
+    if days not in {1, 7}:
+        raise HTTPException(status_code=422, detail="Health range must be one or seven days")
+    response.headers["Cache-Control"] = "private, no-store"
+    return await state.ultrahuman_service.dashboard(days)
+
+
+@router.post("/api/health/refresh", response_model=HealthDashboardResponse)
+async def refresh_health_dashboard(
+    response: Response,
+    days: int = Query(default=1),
+    actor: AuthenticatedUser = Depends(require_admin),
+    state: AppState = Depends(get_app_state),
+) -> HealthDashboardResponse:
+    _ = actor
+    if days not in {1, 7}:
+        raise HTTPException(status_code=422, detail="Health range must be one or seven days")
+    response.headers["Cache-Control"] = "private, no-store"
+    return await state.ultrahuman_service.dashboard(days, force=True)
 
 
 @router.get("/api/system/network", dependencies=[Depends(require_user)])

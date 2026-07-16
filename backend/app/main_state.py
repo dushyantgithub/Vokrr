@@ -12,6 +12,7 @@ from app.services.registry import DeviceRegistry
 from app.services.scene_service import SceneService
 from app.services.spotify import SpotifyService
 from app.services.state_sync import StateSyncService
+from app.services.ultrahuman import UltrahumanClient, UltrahumanService
 from app.services.websocket_manager import WebSocketManager
 
 
@@ -30,6 +31,7 @@ class AppState:
     state_sync: StateSyncService
     network_service: NetworkService
     spotify_service: SpotifyService
+    ultrahuman_service: UltrahumanService
 
 
 _state: AppState | None = None
@@ -60,6 +62,17 @@ def build_app_state() -> AppState:
     )
     network_service = NetworkService(settings)
     spotify_service = SpotifyService(settings)
+    ultrahuman_token = settings.uh_token.get_secret_value()
+    ultrahuman_service = UltrahumanService(
+        UltrahumanClient(
+            ultrahuman_token,
+            settings.uh_account.get_secret_value(),
+            timeout_seconds=settings.ultrahuman_timeout_seconds,
+            max_retries=settings.ultrahuman_max_retries,
+        ),
+        configured=bool(ultrahuman_token),
+        cache_ttl_seconds=settings.ultrahuman_cache_ttl_seconds,
+    )
     return AppState(
         settings=settings,
         auth_service=auth_service,
@@ -74,6 +87,7 @@ def build_app_state() -> AppState:
         state_sync=state_sync,
         network_service=network_service,
         spotify_service=spotify_service,
+        ultrahuman_service=ultrahuman_service,
     )
 
 

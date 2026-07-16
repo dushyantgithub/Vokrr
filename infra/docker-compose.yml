@@ -24,6 +24,7 @@ services:
     privileged: true
     env_file:
       - ../scripts/.env
+      - ../.env
     environment:
       DEVICE_CONFIG_PATH: /app/config/devices.yaml
       COMMAND_CONFIG_PATH: /app/config/commands.yaml

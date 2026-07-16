@@ -64,6 +64,73 @@ def fixture_rooms():
     ]
 
 
+def fixture_health():
+    heart_rate = [58, 61, 64, 62, 67, 72, 69, 65, 63, 60, 62, 64]
+    samples = [
+        {
+            "timestamp": 1_752_665_400 + index * 900,
+            "local_time": f"2025-07-16T{(7 + index // 4):02d}:{(index % 4) * 15:02d}:00+05:30",
+            "local_date": "2025-07-16",
+            "value": value,
+            "unit": "bpm",
+            "metric": "hr",
+            "source": "ultrahuman",
+            "quality": "validated",
+        }
+        for index, value in enumerate(heart_rate)
+    ]
+    current = {
+        "local_date": "2025-07-16",
+        "latest_heart_rate": {"value": 64, "unit": "bpm", "timestamp": samples[-1]["local_time"]},
+        "average_hrv": {"value": 58, "unit": "ms"},
+        "skin_temperature": {"value": 36.4, "unit": "°C"},
+        "resting_heart_rate": {"value": 55, "unit": "bpm"},
+        "spo2": {"value": 97, "unit": "%"},
+        "vo2_max": None,
+        "recovery": {
+            "score": {"value": 84, "unit": "score"},
+            "average_sleep_hrv": {"value": 58, "unit": "ms"},
+            "sleep_resting_hr": {"value": 55, "unit": "bpm"},
+            "temperature_deviation": {"value": -0.2, "unit": "°C"},
+            "heart_rate_drop": None,
+            "restorative_sleep": {"value": 42, "unit": "%"},
+        },
+        "activity": {"steps": {"value": 4321, "unit": "steps"}},
+        "sleep": {
+            "score": {"value": 88, "unit": "score"},
+            "total_sleep_seconds": 27720,
+            "time_in_bed_seconds": 29700,
+            "efficiency": {"value": 93, "unit": "%"},
+            "stages": [
+                {"stage": "deep", "seconds": 6600, "percentage": 22.2},
+                {"stage": "light", "seconds": 15000, "percentage": 50.5},
+                {"stage": "rem", "seconds": 6120, "percentage": 20.6},
+                {"stage": "awake", "seconds": 1980, "percentage": 6.7},
+            ],
+            "timeline": [],
+        },
+        "series": {"hr": samples},
+        "rejected_samples": 0,
+    }
+    return {
+        "range_days": 1,
+        "current": current,
+        "daily": [current],
+        "sync": {
+            "configured": True,
+            "connected": True,
+            "provider": "ultrahuman",
+            "source_api": "partner",
+            "timezone": "Asia/Kolkata",
+            "last_successful_sync_at": "2025-07-16T10:00:00+05:30",
+            "latest_source_at": samples[-1]["local_time"],
+            "cached": False,
+            "stale": False,
+            "partial": False,
+        },
+    }
+
+
 def wait(milliseconds):
     loop = QEventLoop()
     QTimer.singleShot(milliseconds, loop.quit)
@@ -119,6 +186,7 @@ ApplicationWindow {{
 
     shell = window.findChild(QQuickItem, "shell")
     shell.setProperty("rooms", fixture_rooms())
+    shell.setProperty("health", fixture_health())
     shell.setProperty("systemInfo", {"raspberry_pi_model": "Raspberry Pi 5 Model B Rev 1.0"})
     args.output.mkdir(parents=True, exist_ok=True)
     wait(350)

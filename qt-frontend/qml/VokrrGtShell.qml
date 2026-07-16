@@ -13,6 +13,8 @@ Item {
     property var scenes: []
     property var health: null
     property string healthError: ""
+    property bool healthLoading: false
+    property int healthRangeDays: 1
     property bool backendOnline: false
     property bool authenticated: false
     property bool realtimeConnected: false
@@ -51,6 +53,8 @@ Item {
     signal deviceToggleRequested(var device)
     signal deviceSetRequested(var device, var payload)
     signal roomSetRequested(var room, bool state)
+    signal healthRangeRequested(int days)
+    signal healthRefreshRequested()
     signal wakeWordRequested(bool enabled)
     signal themeModeRequested(string mode)
     signal settingsActivated()
@@ -539,10 +543,10 @@ Item {
             y: 112
             width: 172
             height: 172
-            progress: root.recoveryScore() / 100
-            valueText: String(root.recoveryScore())
+            progress: isNaN(root.recoveryScore()) ? 0 : Math.max(0, root.recoveryScore()) / 100
+            valueText: root.recoveryScoreText()
             labelText: "RECOVERY"
-            detailText: "HR " + root.heartRate() + " · SLEEP " + root.sleepDuration()
+            detailText: "HR " + root.heartRateText() + " · SLEEP " + root.sleepDuration()
             accent: root.accentGold
         }
 
@@ -930,40 +934,93 @@ Item {
         Text {
             x: 150
             y: 28
-            width: 360
+            width: 340
             text: root.healthSyncLabel()
-            color: root.textDim
+            color: root.healthConnected() ? root.textDim : "#d98f72"
             font.family: root.monoFont
-            font.pixelSize: 9
-            font.letterSpacing: 2
+            font.pixelSize: 8
+            font.letterSpacing: 1.4
             elide: Text.ElideRight
         }
 
         Row {
-            x: 606
+            x: 540
             y: 16
-            spacing: 8
+            spacing: 6
 
             Repeater {
-                model: [{ label: "TODAY", active: true }, { label: "WEEK", active: false }]
+                model: [{ label: "TODAY", days: 1 }, { label: "WEEK", days: 7 }]
 
                 Rectangle {
+                    id: healthRangeButton
                     required property var modelData
-                    width: 78
+                    property bool active: root.healthRangeDays === healthRangeButton.modelData.days
+                    width: 70
                     height: 28
                     radius: 14
-                    color: modelData.active ? "#16d9cba8" : "transparent"
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.Button
+                    Accessible.name: healthRangeButton.modelData.label + " health range"
+                    color: active ? "#16d9cba8" : "transparent"
                     border.width: 1
-                    border.color: modelData.active ? "#66d9cba8" : "#29d9cba8"
+                    border.color: activeFocus ? root.accentGreen : active ? "#66d9cba8" : "#29d9cba8"
+
+                    Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                            root.healthRangeRequested(healthRangeButton.modelData.days)
+                            event.accepted = true
+                        }
+                    }
 
                     Text {
                         anchors.centerIn: parent
-                        text: modelData.label
-                        color: modelData.active ? root.accentGold : root.textMuted
+                        text: healthRangeButton.modelData.label
+                        color: parent.active ? root.accentGold : root.textMuted
                         font.family: root.displayFont
-                        font.pixelSize: 11
-                        font.letterSpacing: 2
+                        font.pixelSize: 10
+                        font.letterSpacing: 1.5
                     }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: !root.healthLoading
+                        onClicked: root.healthRangeRequested(healthRangeButton.modelData.days)
+                    }
+                }
+            }
+
+            Rectangle {
+                id: healthRefreshButton
+                width: 36
+                height: 28
+                radius: 14
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Button
+                Accessible.name: "Refresh Ultrahuman health data"
+                color: refreshArea.pressed ? "#16d9cba8" : "transparent"
+                border.width: 1
+                border.color: activeFocus ? root.accentGreen : "#29d9cba8"
+
+                Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                        root.healthRefreshRequested()
+                        event.accepted = true
+                    }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: root.healthLoading ? "..." : "↻"
+                    color: root.healthLoading ? root.textDim : root.accentGreen
+                    font.family: root.displayFont
+                    font.pixelSize: root.healthLoading ? 12 : 18
+                }
+
+                MouseArea {
+                    id: refreshArea
+                    anchors.fill: parent
+                    enabled: !root.healthLoading
+                    onClicked: root.healthRefreshRequested()
                 }
             }
         }
@@ -978,61 +1035,62 @@ Item {
 
             Gauge {
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: 24
-                width: 132
-                height: 132
-                progress: root.recoveryScore() / 100
-                valueText: String(root.recoveryScore())
+                y: 18
+                width: 126
+                height: 126
+                progress: isNaN(root.recoveryScore()) ? 0 : Math.max(0, root.recoveryScore()) / 100
+                valueText: root.recoveryScoreText()
                 labelText: "RECOVERY"
                 accent: root.accentGold
             }
 
             Text {
-                y: 170
+                y: 151
                 width: parent.width
-                text: "Ready for strain"
-                color: root.accentGold
-                font.family: root.displayFont
-                font.pixelSize: 13
-                font.weight: Font.Light
+                text: root.healthCurrent() ? "LATEST VALIDATED METRICS" : "NO VALIDATED RING DATA"
+                color: root.healthCurrent() ? root.accentGold : root.textDim
+                font.family: root.monoFont
+                font.pixelSize: 8
+                font.letterSpacing: 1
                 horizontalAlignment: Text.AlignHCenter
             }
 
-            Row {
+            Grid {
                 x: 12
-                y: 220
-                width: parent.width - 24
-                spacing: 6
+                y: 190
+                columns: 2
+                rowSpacing: 15
+                columnSpacing: 6
 
                 Repeater {
-                    model: [
-                        { value: "58", label: "HRV MS" },
-                        { value: "36.4°", label: "SKIN" },
-                        { value: "31%", label: "RING" }
-                    ]
+                    model: root.healthMetricCards()
 
                     Column {
+                        id: healthMetricCard
                         required property var modelData
-                        width: 58
-                        spacing: 3
+                        width: 90
+                        spacing: 2
 
                         Text {
                             width: parent.width
-                            text: modelData.value
-                            color: root.textPrimary
+                            text: healthMetricCard.modelData.value
+                            color: healthMetricCard.modelData.available ? root.textPrimary : root.textDim
                             font.family: root.displayFont
-                            font.pixelSize: 17
+                            font.pixelSize: 16
                             font.weight: Font.Light
                             horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
                         }
 
                         Text {
                             width: parent.width
-                            text: modelData.label
+                            text: healthMetricCard.modelData.label
                             color: root.textDim
                             font.family: root.monoFont
-                            font.pixelSize: 8
+                            font.pixelSize: 7
+                            font.letterSpacing: 0.6
                             horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -1048,7 +1106,7 @@ Item {
             Text {
                 x: 16
                 y: 12
-                text: "HEART RATE · 24H"
+                text: root.healthRangeDays === 7 ? "HEART RATE · 7 DAYS" : "HEART RATE · TODAY"
                 color: root.textDim
                 font.family: root.monoFont
                 font.pixelSize: 9
@@ -1056,11 +1114,11 @@ Item {
             }
 
             Text {
-                x: 400
+                x: 354
                 y: 7
-                width: 112
-                text: root.heartRate() + " BPM"
-                color: root.accentGreen
+                width: 158
+                text: root.heartRateText() + (root.heartRate() >= 0 ? " BPM" : "")
+                color: root.heartRate() >= 0 ? root.accentGreen : root.textDim
                 font.family: root.displayFont
                 font.pixelSize: 20
                 font.weight: Font.Light
@@ -1069,59 +1127,96 @@ Item {
 
             Canvas {
                 id: heartChart
+                property var points: root.heartChartPoints()
+                property int selectedIndex: -1
                 x: 16
                 y: 42
                 width: parent.width - 32
                 height: 94
                 antialiasing: true
+                Accessible.name: root.heartChartSummary()
 
+                onPointsChanged: {
+                    selectedIndex = -1
+                    requestPaint()
+                }
+                onSelectedIndexChanged: requestPaint()
                 onPaint: {
-                    var points = [42, 40, 44, 34, 47, 50, 52, 46, 24, 17, 31, 38, 33, 41, 37, 43, 39]
                     var ctx = getContext("2d")
                     ctx.clearRect(0, 0, width, height)
+                    ctx.strokeStyle = "rgba(138,150,145,0.12)"
+                    ctx.lineWidth = 1
+                    for (var grid = 1; grid < 4; grid++) {
+                        var gy = grid * height / 4
+                        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(width, gy); ctx.stroke()
+                    }
+                    if (!points || points.length < 2)
+                        return
+                    var low = Number(points[0].value)
+                    var high = low
+                    for (var i = 1; i < points.length; i++) {
+                        low = Math.min(low, Number(points[i].value))
+                        high = Math.max(high, Number(points[i].value))
+                    }
+                    var span = Math.max(8, high - low)
+                    low -= span * 0.12
+                    high += span * 0.12
                     var step = width / (points.length - 1)
                     ctx.beginPath()
-                    for (var i = 0; i < points.length; i++) {
-                        var px = i * step
-                        var py = points[i] / 60 * height
-                        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-                    }
-                    ctx.lineTo(width, height)
-                    ctx.lineTo(0, height)
-                    ctx.closePath()
-                    ctx.fillStyle = "rgba(46,199,154,0.06)"
-                    ctx.fill()
-                    ctx.beginPath()
-                    for (var j = 0; j < points.length; j++) {
-                        var xValue = j * step
-                        var yValue = points[j] / 60 * height
-                        if (j === 0) ctx.moveTo(xValue, yValue); else ctx.lineTo(xValue, yValue)
+                    for (var point = 0; point < points.length; point++) {
+                        var px = point * step
+                        var py = height - (Number(points[point].value) - low) / (high - low) * height
+                        if (point === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
                     }
                     ctx.strokeStyle = root.accentGreen
                     ctx.lineWidth = 1.6
                     ctx.stroke()
+                    if (selectedIndex >= 0 && selectedIndex < points.length) {
+                        var sx = selectedIndex * step
+                        var sy = height - (Number(points[selectedIndex].value) - low) / (high - low) * height
+                        ctx.fillStyle = root.accentGold
+                        ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, Math.PI * 2); ctx.fill()
+                    }
                 }
                 onWidthChanged: requestPaint()
                 onHeightChanged: requestPaint()
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onPositionChanged: function(mouse) {
+                        if (!heartChart.points || heartChart.points.length < 2)
+                            return
+                        heartChart.selectedIndex = Math.max(0, Math.min(
+                            heartChart.points.length - 1,
+                            Math.round(mouse.x / width * (heartChart.points.length - 1))))
+                    }
+                    onExited: heartChart.selectedIndex = -1
+                }
             }
 
-            Row {
+            Text {
                 x: 16
-                y: 147
-                width: parent.width - 32
+                y: 139
+                width: 498
+                text: heartChart.selectedIndex >= 0
+                    ? root.chartPointLabel(heartChart.points[heartChart.selectedIndex])
+                    : root.chartAxisLabel(heartChart.points)
+                color: heartChart.selectedIndex >= 0 ? root.accentGold : root.inactive
+                font.family: root.monoFont
+                font.pixelSize: 8
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
 
-                Repeater {
-                    model: ["00:00", "06:00", "12:00", "18:00", "NOW"]
-                    Text {
-                        required property string modelData
-                        width: 99
-                        text: modelData
-                        color: root.inactive
-                        font.family: root.monoFont
-                        font.pixelSize: 8
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-                }
+            Text {
+                anchors.centerIn: heartChart
+                visible: !heartChart.points || heartChart.points.length < 2
+                text: root.healthLoading ? "SYNCING RING DATA" : "HEART RATE UNAVAILABLE"
+                color: root.textDim
+                font.family: root.monoFont
+                font.pixelSize: 9
+                font.letterSpacing: 1.3
             }
         }
 
@@ -1142,11 +1237,11 @@ Item {
             }
 
             Text {
-                x: 346
+                x: 320
                 y: 8
-                width: 166
-                text: root.sleepDuration() + " · 88"
-                color: root.textPrimary
+                width: 192
+                text: root.sleepHeadline()
+                color: root.hasSleepData() ? root.textPrimary : root.textDim
                 font.family: root.displayFont
                 font.pixelSize: 17
                 font.weight: Font.Light
@@ -1155,60 +1250,78 @@ Item {
 
             Row {
                 x: 16
-                y: 54
-                width: parent.width - 32
+                y: 49
+                width: 498
                 height: 13
+                visible: root.sleepStageModel().length > 0
 
                 Repeater {
-                    model: [
-                        { widthFactor: 0.14, color: "#114b3f" },
-                        { widthFactor: 0.24, color: "#1c8a68" },
-                        { widthFactor: 0.10, color: "#2ec79a" },
-                        { widthFactor: 0.20, color: "#1c8a68" },
-                        { widthFactor: 0.08, color: "#114b3f" },
-                        { widthFactor: 0.14, color: "#2ec79a" },
-                        { widthFactor: 0.10, color: "#1c8a68" }
-                    ]
+                    model: root.sleepStageModel()
 
                     Rectangle {
+                        id: sleepStageBar
                         required property var modelData
-                        width: 498 * modelData.widthFactor
+                        width: 498 * sleepStageBar.modelData.percentage / 100
                         height: 13
-                        color: modelData.color
+                        color: sleepStageBar.modelData.color
                     }
                 }
             }
 
             Row {
                 x: 16
-                y: 91
-                spacing: 16
+                y: 77
+                width: 498
+                visible: root.sleepStageModel().length > 0
 
                 Repeater {
-                    model: [
-                        { color: "#2ec79a", label: "DEEP 1H50" },
-                        { color: "#1c8a68", label: "LIGHT 4H10" },
-                        { color: "#114b3f", label: "REM 1H42" }
-                    ]
+                    model: root.sleepStageModel()
 
                     Row {
+                        id: sleepStageLegend
                         required property var modelData
-                        spacing: 6
+                        width: 124
+                        spacing: 5
                         Rectangle {
-                            width: 7
-                            height: 7
-                            radius: 4
-                            color: modelData.color
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: sleepStageLegend.modelData.color
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
-                            text: modelData.label
+                            width: 110
+                            text: sleepStageLegend.modelData.label
                             color: root.textDim
                             font.family: root.monoFont
-                            font.pixelSize: 8
+                            font.pixelSize: 7
+                            elide: Text.ElideRight
                         }
                     }
                 }
+            }
+
+            Text {
+                x: 16
+                y: 106
+                width: 498
+                text: "WELLNESS DATA · NOT A MEDICAL DIAGNOSIS · FRESHNESS DEPENDS ON RING AND APP SYNC"
+                color: root.inactive
+                font.family: root.monoFont
+                font.pixelSize: 7
+                font.letterSpacing: 0.45
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: root.sleepStageModel().length === 0
+                text: "SLEEP STAGES UNAVAILABLE"
+                color: root.textDim
+                font.family: root.monoFont
+                font.pixelSize: 9
+                font.letterSpacing: 1.3
             }
         }
     }
@@ -1545,9 +1658,9 @@ Item {
 
             SettingsStatusRow {
                 title: "Ultrahuman Ring"
-                subtitle: "SYNCED " + root.clockText + " · BATTERY 31%"
-                statusText: "● CONNECTED"
-                statusColor: root.accentGreen
+                subtitle: root.ultrahumanSubtitle()
+                statusText: root.healthConnected() ? "● CONNECTED" : "● NOT CONNECTED"
+                statusColor: root.healthConnected() ? root.accentGreen : "#d98f72"
             }
 
             SettingsStatusRow {
@@ -2000,16 +2113,182 @@ Item {
         return total
     }
 
+    function healthCurrent() {
+        return health && health.current ? health.current : null
+    }
+
+    function metricNumber(metric) {
+        if (!metric || metric.value === undefined || metric.value === null)
+            return NaN
+        var value = Number(metric.value)
+        return value
+    }
+
+    function numberText(value, decimals) {
+        if (isNaN(value))
+            return "--"
+        var text = Number(value).toFixed(decimals)
+        return decimals > 0 ? text.replace(/\.0+$/, "") : text
+    }
+
     function recoveryScore() {
-        return health && health.recovery_score !== undefined ? Math.round(Number(health.recovery_score)) : 84
+        var current = healthCurrent()
+        return current && current.recovery ? metricNumber(current.recovery.score) : NaN
+    }
+
+    function recoveryScoreText() {
+        return numberText(recoveryScore(), 0)
     }
 
     function heartRate() {
-        return health && health.heart_rate !== undefined ? Math.round(Number(health.heart_rate)) : 62
+        var current = healthCurrent()
+        return current ? metricNumber(current.latest_heart_rate) : NaN
+    }
+
+    function heartRateText() {
+        return numberText(heartRate(), 0)
+    }
+
+    function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined)
+            return "--"
+        var total = Number(seconds)
+        if (isNaN(total) || total < 0)
+            return "--"
+        var hours = Math.floor(total / 3600)
+        var minutes = Math.round((total % 3600) / 60)
+        if (minutes === 60) {
+            hours += 1
+            minutes = 0
+        }
+        return hours > 0 ? hours + "h " + minutes + "m" : minutes + "m"
     }
 
     function sleepDuration() {
-        return health && health.sleep_duration ? String(health.sleep_duration) : "7h 42m"
+        var current = healthCurrent()
+        return current && current.sleep ? formatDuration(current.sleep.total_sleep_seconds) : "--"
+    }
+
+    function hasSleepData() {
+        var current = healthCurrent()
+        return current && current.sleep && current.sleep.total_sleep_seconds !== null
+            && current.sleep.total_sleep_seconds !== undefined
+    }
+
+    function sleepHeadline() {
+        var current = healthCurrent()
+        if (!current || !current.sleep)
+            return "--"
+        var duration = sleepDuration()
+        var score = metricNumber(current.sleep.score)
+        return duration + (score >= 0 ? " · " + numberText(score, 0) : "")
+    }
+
+    function sleepStageModel() {
+        var current = healthCurrent()
+        var stages = current && current.sleep && current.sleep.stages ? current.sleep.stages : []
+        var colors = { awake: "#53615c", light: "#1c8a68", deep: "#2ec79a", rem: "#24745f" }
+        var order = ["deep", "light", "rem", "awake"]
+        var result = []
+        for (var i = 0; i < order.length; i++) {
+            for (var j = 0; j < stages.length; j++) {
+                if (String(stages[j].stage).toLowerCase() === order[i] && Number(stages[j].seconds) > 0) {
+                    result.push({
+                        stage: order[i],
+                        percentage: Number(stages[j].percentage),
+                        color: colors[order[i]],
+                        label: order[i].toUpperCase() + " " + formatDuration(stages[j].seconds).toUpperCase()
+                    })
+                }
+            }
+        }
+        return result
+    }
+
+    function healthMetricCards() {
+        var current = healthCurrent()
+        if (!current)
+            return [
+                { value: "--", label: "SLEEP HRV", available: false },
+                { value: "--", label: "RESTING HR", available: false },
+                { value: "--", label: "TEMP DELTA", available: false },
+                { value: "--", label: "SPO2", available: false }
+            ]
+        var recovery = current.recovery || {}
+        var hrv = metricNumber(recovery.average_sleep_hrv || current.average_hrv)
+        var rhr = metricNumber(recovery.sleep_resting_hr || current.resting_heart_rate)
+        var temperatureMetric = recovery.temperature_deviation
+        var temperature = metricNumber(temperatureMetric)
+        var spo2 = metricNumber(current.spo2)
+        return [
+            { value: numberText(hrv, 0) + (hrv >= 0 ? " ms" : ""), label: "SLEEP HRV", available: hrv >= 0 },
+            { value: numberText(rhr, 0) + (rhr >= 0 ? " bpm" : ""), label: "RESTING HR", available: rhr >= 0 },
+            { value: (temperature > 0 ? "+" : "") + numberText(temperature, 1) + (!isNaN(temperature) ? "°" : ""), label: "TEMP DELTA", available: !isNaN(temperature) },
+            { value: numberText(spo2, 0) + (spo2 >= 0 ? "%" : ""), label: "SPO2", available: spo2 >= 0 }
+        ]
+    }
+
+    function heartChartPoints() {
+        if (healthRangeDays === 7) {
+            var daily = health && health.daily ? health.daily : []
+            var result = []
+            for (var i = 0; i < daily.length; i++) {
+                var value = metricNumber(daily[i].latest_heart_rate)
+                if (value >= 0)
+                    result.push({ value: value, local_time: daily[i].local_date, unit: "bpm" })
+            }
+            return result
+        }
+        var current = healthCurrent()
+        return current && current.series && current.series.hr ? current.series.hr : []
+    }
+
+    function pointTime(point) {
+        if (!point || !point.local_time)
+            return ""
+        var date = new Date(point.local_time)
+        if (isNaN(date.getTime()))
+            return String(point.local_time)
+        if (healthRangeDays === 7)
+            return date.toLocaleDateString(Qt.locale(), "ddd d")
+        return date.toLocaleTimeString(Qt.locale(), "HH:mm")
+    }
+
+    function chartPointLabel(point) {
+        return point ? pointTime(point) + " · " + numberText(Number(point.value), 0) + " BPM" : ""
+    }
+
+    function chartAxisLabel(points) {
+        if (!points || points.length < 2)
+            return ""
+        return pointTime(points[0]) + "                                      "
+            + pointTime(points[Math.floor(points.length / 2)]) + "                                      "
+            + pointTime(points[points.length - 1])
+    }
+
+    function heartChartSummary() {
+        var points = heartChartPoints()
+        if (!points || points.length < 2)
+            return "Heart rate chart unavailable"
+        var low = Number(points[0].value)
+        var high = low
+        for (var i = 1; i < points.length; i++) {
+            low = Math.min(low, Number(points[i].value))
+            high = Math.max(high, Number(points[i].value))
+        }
+        return "Heart rate chart with " + points.length + " measurements, from "
+            + numberText(low, 0) + " to " + numberText(high, 0) + " beats per minute"
+    }
+
+    function healthConnected() {
+        return !!(health && health.sync && health.sync.connected)
+    }
+
+    function syncTime(value) {
+        if (!value)
+            return "UNAVAILABLE"
+        var date = new Date(value)
+        return isNaN(date.getTime()) ? "UNAVAILABLE" : date.toLocaleTimeString(Qt.locale(), "HH:mm")
     }
 
     function weatherLabel() {
@@ -2027,11 +2306,32 @@ Item {
         if (!backendOnline)
             return "Backend offline · controls will reconnect automatically."
         var sync = realtimeConnected ? "live" : "syncing"
-        return activeDeviceCount(devices) + " of " + devices.length + " devices on · " + sync + " · recovery " + recoveryScore() + "."
+        var recovery = recoveryScore()
+        return activeDeviceCount(devices) + " of " + devices.length + " devices on · " + sync
+            + (recovery >= 0 ? " · recovery " + numberText(recovery, 0) : "") + "."
     }
 
     function healthSyncLabel() {
-        return healthError ? "ULTRAHUMAN RING · LAST SYNC UNAVAILABLE" : "ULTRAHUMAN RING · SYNCED " + clockText
+        if (healthLoading && !healthCurrent())
+            return "ULTRAHUMAN RING · SYNCING"
+        if (!health || !health.sync)
+            return "ULTRAHUMAN RING · WAITING FOR SYNC"
+        if (!health.sync.configured)
+            return "ULTRAHUMAN RING · NOT CONFIGURED"
+        if (health.sync.cached)
+            return "ULTRAHUMAN RING · CACHED · SYNC " + syncTime(health.sync.last_successful_sync_at)
+        if (!health.sync.connected)
+            return "ULTRAHUMAN RING · SYNC UNAVAILABLE"
+        return "ULTRAHUMAN RING · LATEST " + syncTime(health.sync.latest_source_at)
+    }
+
+    function ultrahumanSubtitle() {
+        if (!health || !health.sync || !health.sync.configured)
+            return "SERVER CREDENTIALS NOT CONFIGURED"
+        if (!health.sync.connected)
+            return String(health.sync.message || "SYNC UNAVAILABLE").toUpperCase()
+        return (health.sync.cached ? "CACHED · " : "")
+            + "LAST SYNC " + syncTime(health.sync.last_successful_sync_at)
     }
 
     function jarvisStateLabel() {
@@ -2057,7 +2357,12 @@ Item {
             return assistantMessage
         if (voicePipelineActive)
             return "Listening for your command."
-        return "You slept " + sleepDuration() + ", recovery " + recoveryScore() + ". Switching off the bedroom sockets."
+        if (!hasSleepData())
+            return "Ring sleep data is unavailable. Switching off the bedroom sockets."
+        var recovery = recoveryScore()
+        return "You slept " + sleepDuration()
+            + (recovery >= 0 ? ", recovery " + numberText(recovery, 0) : "")
+            + ". Switching off the bedroom sockets."
     }
 
     function systemLabel() {

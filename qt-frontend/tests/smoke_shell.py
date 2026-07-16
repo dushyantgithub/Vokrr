@@ -10,7 +10,7 @@ from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
-from render_shell import fixture_rooms, wait
+from render_shell import fixture_health, fixture_rooms, wait
 
 
 def variant(value):
@@ -40,6 +40,7 @@ ApplicationWindow {
     window = component.create()
     shell = window.findChild(QQuickItem, "shell")
     shell.setProperty("rooms", fixture_rooms())
+    shell.setProperty("health", fixture_health())
     wait(250)
 
     def click(x, y):
@@ -49,11 +50,15 @@ ApplicationWindow {
     toggles = []
     sets = []
     wake_changes = []
+    health_ranges = []
+    health_refreshes = []
     shell.deviceToggleRequested.connect(lambda device: toggles.append(variant(device)))
     shell.deviceSetRequested.connect(
         lambda device, payload: sets.append((variant(device), variant(payload)))
     )
     shell.wakeWordRequested.connect(lambda enabled: wake_changes.append(enabled))
+    shell.healthRangeRequested.connect(lambda days: health_ranges.append(days))
+    shell.healthRefreshRequested.connect(lambda: health_refreshes.append(True))
 
     click(350, 439)
     assert shell.property("currentScreen") == "rooms"
@@ -71,6 +76,11 @@ ApplicationWindow {
     assert shell.property("currentScreen") == "settings"
     click(734, 101)
     assert wake_changes == [False]
+    shell.setProperty("currentScreen", "health")
+    click(650, 30)
+    click(710, 30)
+    assert health_ranges == [7]
+    assert health_refreshes == [True]
 
     window.close()
     app.quit()

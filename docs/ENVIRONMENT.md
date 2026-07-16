@@ -48,6 +48,18 @@ Security:
 | `HOME_ASSISTANT_URL` | Required | `http://localhost:8123` | HA base URL. Host networking makes localhost valid in containers. |
 | `HOME_ASSISTANT_TOKEN` | Required for sync/control | `eyJ...` | HA long-lived access token. Sensitive. |
 
+## Ultrahuman Ring AIR
+
+| Name | Required | Example | Description |
+| --- | --- | --- | --- |
+| `UH_TOKEN` | Required for Ultrahuman | `eyJ...` | Server-only Personal or partner API authorization token. Sensitive. Alias: `ULTRAHUMAN_PERSONAL_API_TOKEN`. |
+| `UH_ACCOUNT` | Partner credentials only | `owner@example.com` | Account email required by the legacy partner endpoint. Leave empty for a Personal API token. |
+| `ULTRAHUMAN_TIMEOUT_SECONDS` | Optional | `10` | Per-request timeout, bounded from 1 to 30 seconds. |
+| `ULTRAHUMAN_MAX_RETRIES` | Optional | `2` | Retry count for timeouts, rate limits, and server failures. Authentication errors are not retried. |
+| `ULTRAHUMAN_CACHE_TTL_SECONDS` | Optional | `300` | In-memory daily-metric cache duration, bounded from 30 to 3600 seconds. |
+
+`UH_ACCESS_CODE` is not an API request credential. Enter the data-sharing code in the Ultrahuman app under **Profile > Settings > Partner ID** when using legacy partner access; Vokrr intentionally does not transmit it.
+
 ## Network and Wi-Fi
 
 | Name | Required | Example | Description |

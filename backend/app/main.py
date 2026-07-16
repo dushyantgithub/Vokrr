@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.main_state import build_app_state, set_app_state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

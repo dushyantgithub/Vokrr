@@ -20,8 +20,11 @@ ApplicationWindow {
     property var currentUser: null
     property var rooms: []
     property var scenes: []
+    property var systemHealth: null
     property var health: null
     property string healthError: ""
+    property bool healthLoading: false
+    property int healthRangeDays: 1
     property var networkStatus: null
     property var systemInfo: ({})
     property string assistantStatus: "idle"
@@ -38,7 +41,7 @@ ApplicationWindow {
     property bool toastVisible: false
     property bool startupVisible: true
 
-    readonly property bool backendOnline: health !== null && healthError.length === 0
+    readonly property bool backendOnline: systemHealth !== null
     readonly property bool voiceActive: assistantStatus !== "idle"
         && assistantStatus !== "done"
         && assistantStatus !== "error"
@@ -133,7 +136,8 @@ ApplicationWindow {
         refreshToken = data.refresh_token || ""
         currentUser = data.user || null
         loadSnapshot()
-        loadHealth()
+        loadSystemHealth()
+        loadUltrahuman(false)
         loadNetworkStatus()
         loadSystemInfo()
         realtime.active = true
@@ -367,16 +371,36 @@ ApplicationWindow {
         })
     }
 
-    function loadHealth() {
+    function loadSystemHealth() {
         http("GET", "/api/system/health", null, function(status, data) {
             if (status >= 200 && status < 300 && data) {
-                health = data
-                healthError = ""
+                systemHealth = data
             } else {
-                health = null
-                healthError = "Backend unavailable"
+                systemHealth = null
             }
         }, false)
+    }
+
+    function loadUltrahuman(force) {
+        if (!token || healthLoading)
+            return
+        healthLoading = true
+        var method = force ? "POST" : "GET"
+        var path = force ? "/api/health/refresh" : "/api/health/dashboard"
+        path += "?days=" + healthRangeDays
+        http(method, path, null, function(status, data) {
+            healthLoading = false
+            if (status >= 200 && status < 300 && data) {
+                health = data
+                healthError = data.sync && data.sync.message ? String(data.sync.message) : ""
+                if (force)
+                    showToast(data.sync && data.sync.connected ? "Health data refreshed" : "Health refresh unavailable")
+            } else {
+                healthError = "Health sync unavailable"
+                if (force)
+                    showToast(healthError)
+            }
+        })
     }
 
     function loadNetworkStatus() {
@@ -418,7 +442,7 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        loadHealth()
+        loadSystemHealth()
         kioskLogin()
     }
 
@@ -434,7 +458,7 @@ ApplicationWindow {
         running: !token
         repeat: true
         onTriggered: {
-            loadHealth()
+            loadSystemHealth()
             kioskLogin()
         }
     }
@@ -444,11 +468,18 @@ ApplicationWindow {
         running: token.length > 0
         repeat: true
         onTriggered: {
-            loadHealth()
+            loadSystemHealth()
             loadNetworkStatus()
             if (!realtimeConnected)
                 loadSnapshot()
         }
+    }
+
+    Timer {
+        interval: 60000
+        running: app.token.length > 0 && shell.currentScreen === "health"
+        repeat: true
+        onTriggered: app.loadUltrahuman(false)
     }
 
     Timer {
@@ -506,6 +537,8 @@ ApplicationWindow {
         scenes: app.scenes
         health: app.health
         healthError: app.healthError
+        healthLoading: app.healthLoading
+        healthRangeDays: app.healthRangeDays
         backendOnline: app.backendOnline
         authenticated: app.token.length > 0
         realtimeConnected: app.realtimeConnected
@@ -527,6 +560,15 @@ ApplicationWindow {
         onDeviceToggleRequested: function(device) { app.toggleDevice(device) }
         onDeviceSetRequested: function(device, payload) { app.setDevice(device, payload) }
         onRoomSetRequested: function(room, state) { app.setRoomState(room, state) }
+        onHealthRangeRequested: function(days) {
+            app.healthRangeDays = days
+            app.loadUltrahuman(false)
+        }
+        onHealthRefreshRequested: app.loadUltrahuman(true)
+        onCurrentScreenChanged: {
+            if (currentScreen === "health")
+                app.loadUltrahuman(false)
+        }
         onWakeWordRequested: function(enabled) { preferences.wakeWordEnabled = enabled }
         onThemeModeRequested: function(mode) { preferences.themeMode = mode }
         onSettingsActivated: {

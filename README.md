@@ -59,6 +59,7 @@ cp .env.example scripts/.env
 Edit `.env` and `scripts/.env`:
 
 - Set `HOME_ASSISTANT_TOKEN`.
+- Set `UH_TOKEN` for Ultrahuman Personal API access. For legacy partner credentials, also set `UH_ACCOUNT`.
 - Set `APP_BOOTSTRAP_ADMIN_USERNAME`, `APP_BOOTSTRAP_ADMIN_PASSWORD`, and `APP_AUTH_SECRET`.
 - Set `PORCUPINE_API_KEY` if voice is enabled.
 - Set `NVIDIA_API_KEY` or `NVIDIA_BUILD_API_KEY` if the NVIDIA voice pipeline is enabled.
@@ -86,6 +87,7 @@ Open service URLs:
 
 - Backend API docs: `http://localhost:8080/docs`
 - Backend health: `http://localhost:8080/api/system/health`
+- Authenticated Ultrahuman dashboard: `http://localhost:8080/api/health/dashboard`
 - Home Assistant: `http://localhost:8123`
 - Voice listener health: `http://localhost:8091/health`
 
@@ -184,6 +186,7 @@ docker compose -f infra/docker-compose.yml ps
 Security notes:
 
 - Never commit `.env`, `scripts/.env`, Home Assistant tokens, Spotify tokens, NVIDIA keys, or Cloudflare tokens.
+- Ultrahuman credentials remain in the backend environment; the Qt client only receives normalized metrics.
 - `backend/data/` contains runtime databases and OAuth tokens.
 - Expose only the backend through Cloudflare Tunnel. Do not expose Home Assistant directly.
 
@@ -199,6 +202,7 @@ Security notes:
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Cloudflare Tunnel](docs/deployment/cloudflare-tunnel.md)
 - [Home Assistant setup](docs/setup/home-assistant.md)
+- [Ultrahuman setup](docs/setup/ultrahuman.md)
 - [iOS app notes](docs/setup/ios-app.md)
 
 ## Troubleshooting
