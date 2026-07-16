@@ -14,6 +14,7 @@ using namespace esp_panel::drivers;
 
 #define LVGL_PORT_ENABLE_ROTATION_OPTIMIZED     (1)
 #define LVGL_PORT_BUFFER_NUM_MAX                (2)
+#define LVGL_PORT_VSYNC_WAIT_TIMEOUT_MS         (60)
 
 static SemaphoreHandle_t lvgl_mux = nullptr;                  // LVGL mutex
 static TaskHandle_t lvgl_task_handle = nullptr;
@@ -401,12 +402,17 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
 {
     LCD *lcd = (LCD *)drv->user_data;
 
+    /* Align the buffer swap to a frame boundary. Switching first can tear on RGB panels
+     * that apply the draw_bitmap frame-buffer pointer before the current scan finishes. */
+    ulTaskNotifyValueClear(NULL, ULONG_MAX);
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(LVGL_PORT_VSYNC_WAIT_TIMEOUT_MS));
+
     /* Switch the current LCD frame buffer to `color_map` */
     lcd->switchFrameBufferTo(color_map);
 
-    /* Waiting for the last frame buffer to complete transmission */
+    /* Wait until the newly selected frame has completed transmission. */
     ulTaskNotifyValueClear(NULL, ULONG_MAX);
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(LVGL_PORT_VSYNC_WAIT_TIMEOUT_MS));
 
     lv_disp_flush_ready(drv);
 }
