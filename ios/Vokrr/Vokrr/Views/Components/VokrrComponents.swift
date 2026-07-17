@@ -2,25 +2,7 @@ import SwiftUI
 
 struct AuroraBackground: View {
     var body: some View {
-        ZStack {
-            VokrrTheme.background
-                .ignoresSafeArea()
-            Circle()
-                .fill(VokrrTheme.lavender.opacity(0.33))
-                .frame(width: 280, height: 280)
-                .blur(radius: 60)
-                .offset(x: 90, y: -240)
-            Circle()
-                .fill(VokrrTheme.sky.opacity(0.28))
-                .frame(width: 260, height: 260)
-                .blur(radius: 70)
-                .offset(x: -80, y: 80)
-            Circle()
-                .fill(Color.white.opacity(0.14))
-                .frame(width: 180, height: 180)
-                .blur(radius: 40)
-                .offset(x: -40, y: 180)
-        }
+        VokrrTheme.background.ignoresSafeArea()
     }
 }
 
@@ -39,16 +21,16 @@ struct SectionHeader: View {
     let subtitle: String
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(VokrrTheme.secondaryText)
-            }
-            Spacer()
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(VokrrTheme.jost(20))
+                .foregroundStyle(VokrrTheme.primaryText)
+            Text(subtitle.uppercased())
+                .font(VokrrTheme.mono(8))
+                .tracking(1.5)
+                .foregroundStyle(VokrrTheme.tertiaryText)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -57,313 +39,220 @@ struct TabPill: View {
     let isActive: Bool
 
     var body: some View {
-        Text(title)
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(isActive ? Color.black : Color.white.opacity(0.88))
+        Text(title.uppercased())
+            .font(VokrrTheme.mono(8, medium: true))
+            .tracking(1.5)
+            .foregroundStyle(isActive ? VokrrTheme.background : VokrrTheme.secondaryText)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isActive ? AnyShapeStyle(VokrrTheme.gradient) : AnyShapeStyle(Color.white.opacity(0.06)))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(isActive ? 0 : 0.08), lineWidth: 1)
-            )
+            .frame(height: 36)
+            .background(isActive ? VokrrTheme.emerald : VokrrTheme.champagne.opacity(0.06), in: Capsule())
     }
 }
 
-struct JarvisBar: View {
-    let status: String
-    let message: String
-    let health: HealthResponse?
-    let unreadCount: Int
-    let onNotifications: () -> Void
-
-    private var statusColor: Color {
-        switch status {
-        case "listening":
-            return VokrrTheme.lavender
-        case "processing":
-            return VokrrTheme.sky
-        case "done":
-            return VokrrTheme.mint
-        case "error", "command_error":
-            return .red.opacity(0.8)
-        default:
-            return Color.white.opacity(0.8)
-        }
-    }
+struct VokrrConnectionBadge: View {
+    let isConnected: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathing = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 12, height: 12)
-                    .shadow(color: statusColor.opacity(0.8), radius: 14)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(status.capitalized)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(VokrrTheme.secondaryText)
-                    Text(message)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                Circle()
-                    .fill((health?.homeAssistant.ok ?? false) ? VokrrTheme.mint : Color.orange)
-                    .frame(width: 8, height: 8)
-                Text((health?.homeAssistant.ok ?? false) ? "Online" : "Offline")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(VokrrTheme.secondaryText)
-            }
-
-            Button(action: onNotifications) {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "bell")
-                        .font(.headline)
-                        .foregroundStyle(Color.white)
-                    if unreadCount > 0 {
-                        Text(unreadCount > 9 ? "9+" : "\(unreadCount)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.black)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(VokrrTheme.gradient))
-                            .offset(x: 12, y: -8)
-                    }
-                }
-                .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(isConnected ? VokrrTheme.emerald : VokrrTheme.champagne.opacity(0.35))
+                .frame(width: 5, height: 5)
+                .shadow(color: isConnected ? VokrrTheme.emerald.opacity(0.9) : .clear, radius: 6)
+                .opacity(reduceMotion ? 1 : (breathing ? 0.85 : 0.3))
+            Text(isConnected ? "HOME LINKED" : "RECONNECTING")
+                .font(VokrrTheme.mono(8, medium: true))
+                .tracking(2)
+                .foregroundStyle(isConnected ? VokrrTheme.emerald : VokrrTheme.tertiaryText)
         }
-        .padding(16)
-        .glassCard()
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background((isConnected ? VokrrTheme.emerald : VokrrTheme.champagne).opacity(0.08), in: Capsule())
+        .overlay(Capsule().stroke((isConnected ? VokrrTheme.emerald : VokrrTheme.champagne).opacity(0.30)))
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                breathing = true
+            }
+        }
     }
 }
 
-struct NotificationsSheet: View {
-    let notifications: [NotificationItem]
+struct VokrrToggle: View {
+    let isOn: Bool
 
     var body: some View {
-        NavigationStack {
-            List(notifications) { item in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Circle()
-                            .fill(color(for: item.level))
-                            .frame(width: 10, height: 10)
-                        Text(item.title)
-                            .font(.headline)
-                    }
-                    Text(item.detail)
-                        .font(.subheadline)
-                    Text(item.date.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 6)
-                .listRowBackground(Color.clear)
+        Capsule()
+            .fill(isOn ? VokrrTheme.emerald : VokrrTheme.champagne.opacity(0.18))
+            .frame(width: 42, height: 25)
+            .overlay(alignment: isOn ? .trailing : .leading) {
+                Circle()
+                    .fill(VokrrTheme.primaryText)
+                    .frame(width: 19, height: 19)
+                    .padding(3)
             }
-            .scrollContentBackground(.hidden)
-            .background(VokrrTheme.background.ignoresSafeArea())
-            .navigationTitle("Notifications")
-        }
-    }
-
-    private func color(for level: NotificationLevel) -> Color {
-        switch level {
-        case .info:
-            return VokrrTheme.sky
-        case .warning:
-            return Color.orange
-        case .error:
-            return Color.red
-        }
+            .animation(VokrrTheme.control, value: isOn)
     }
 }
 
-struct BottomTabBar: View {
+struct VokrrTabBar: View {
     @Binding var selectedTab: VokrrTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack {
+        HStack(spacing: 6) {
             ForEach(VokrrTab.allCases) { tab in
+                let isJarvis = tab == .jarvis
+                let active = selectedTab == tab
                 Button {
-                    selectedTab = tab
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: icon(for: tab))
-                            .font(.headline)
-                        Text(label(for: tab))
-                            .font(.caption2.weight(.medium))
+                    if reduceMotion {
+                        selectedTab = tab
+                    } else {
+                        withAnimation(VokrrTheme.tab) { selectedTab = tab }
                     }
-                    .foregroundStyle(selectedTab == tab ? Color.white : VokrrTheme.secondaryText)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+                } label: {
+                    Circle()
+                        .fill(background(for: tab, active: active))
+                        .frame(width: isJarvis ? 56 : 46, height: isJarvis ? 56 : 46)
+                        .overlay(
+                            Circle().stroke(border(for: tab, active: active), lineWidth: 1)
+                        )
+                        .overlay {
+                            Image(systemName: icon(for: tab))
+                                .font(.system(size: isJarvis ? 21 : 18, weight: .light))
+                                .foregroundStyle(foreground(for: tab, active: active))
+                        }
+                        .shadow(
+                            color: active && isJarvis ? VokrrTheme.emerald.opacity(0.45) : .clear,
+                            radius: 12
+                        )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(VokrrPressStyle())
+                .accessibilityLabel(tab.rawValue)
+                .accessibilityValue(active ? "Selected" : "")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 18)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .padding(8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .background(Color(red: 13 / 255, green: 16 / 255, blue: 15 / 255).opacity(0.78), in: Capsule())
+        .overlay(Capsule().stroke(VokrrTheme.champagne.opacity(0.14)))
+        .shadow(color: .black.opacity(0.60), radius: 24, y: 14)
     }
 
-    private func label(for tab: VokrrTab) -> String {
-        switch tab {
-        case .dashboard: return "Home"
-        default: return tab.rawValue
-        }
+    private func background(for tab: VokrrTab, active: Bool) -> Color {
+        if active { return tab == .jarvis ? VokrrTheme.emerald : VokrrTheme.emerald.opacity(0.12) }
+        return tab == .jarvis ? VokrrTheme.emerald.opacity(0.14) : .clear
+    }
+
+    private func border(for tab: VokrrTab, active: Bool) -> Color {
+        if active { return VokrrTheme.emerald.opacity(0.40) }
+        return tab == .jarvis ? VokrrTheme.emerald.opacity(0.30) : .clear
+    }
+
+    private func foreground(for tab: VokrrTab, active: Bool) -> Color {
+        if active { return tab == .jarvis ? VokrrTheme.background : VokrrTheme.emerald }
+        return VokrrTheme.secondaryText
     }
 
     private func icon(for tab: VokrrTab) -> String {
         switch tab {
-        case .dashboard: return "house.fill"
-        case .devices: return "switch.2"
-        case .routines: return "sparkles"
-        case .activity: return "clock.arrow.circlepath"
-        case .news: return "newspaper"
-        case .settings: return "gearshape"
+        case .home: "house"
+        case .health: "heart"
+        case .jarvis: "mic"
+        case .settings: "gearshape"
         }
     }
 }
 
-struct DeviceDetailSheet: View {
-    @EnvironmentObject private var appState: AppState
-    @State private var sliderValue: Double
-    let device: Device
+struct VokrrPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(device: Device) {
-        self.device = device
-        _sliderValue = State(initialValue: device.levelValue)
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.97 : 1))
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
+}
+
+struct VokrrSplashView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var spinOuter = false
+    @State private var spinInner = false
+    @State private var pulse = false
+    @State private var breathe = false
+    @State private var progress = false
+    @State private var fading = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(device.name)
-                            .font(.title.bold())
-                        Text(device.roomName)
-                            .foregroundStyle(VokrrTheme.secondaryText)
-                    }
-                    Spacer()
-                    Button {
-                        Task { await appState.toggleDevice(device) }
-                    } label: {
-                        Image(systemName: device.state.isOn ? "power.circle.fill" : "power.circle")
-                            .font(.system(size: 34))
-                            .foregroundStyle(device.state.isOn ? VokrrTheme.lavender : Color.white.opacity(0.8))
-                    }
-                    .buttonStyle(.plain)
+        ZStack {
+            VokrrTheme.background.ignoresSafeArea()
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .stroke(VokrrTheme.emerald.opacity(0.40), style: StrokeStyle(lineWidth: 1, dash: [6, 6]))
+                        .rotationEffect(.degrees(spinOuter ? 360 : 0))
+                    Circle()
+                        .trim(from: 0, to: 0.72)
+                        .stroke(VokrrTheme.champagne.opacity(0.38), lineWidth: 1)
+                        .padding(15)
+                        .rotationEffect(.degrees(spinInner ? -360 : 0))
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [VokrrTheme.emerald.opacity(0.50), VokrrTheme.emerald.opacity(0.06)],
+                                center: .center,
+                                startRadius: 0,
+                                endRadius: 38
+                            )
+                        )
+                        .frame(width: 74, height: 74)
+                        .scaleEffect(pulse ? 1.07 : 1)
+                        .opacity(pulse ? 1 : 0.85)
+                        .shadow(color: VokrrTheme.emerald.opacity(0.35), radius: 20)
+                    Text("V")
+                        .font(VokrrTheme.jost(34))
+                        .tracking(6)
+                        .foregroundStyle(VokrrTheme.primaryText)
                 }
+                .frame(width: 170, height: 170)
 
-                if device.supportsLevel {
-                    VStack(spacing: 20) {
-                        ZStack(alignment: .bottom) {
-                            RoundedRectangle(cornerRadius: 70, style: .continuous)
-                                .fill(Color.white.opacity(0.06))
-                                .frame(width: 144, height: 360)
-                            RoundedRectangle(cornerRadius: 70, style: .continuous)
-                                .fill(VokrrTheme.gradient)
-                                .frame(width: 144, height: max(40, 320 * sliderValue / 100 + 40))
-                            VStack(spacing: 4) {
-                                Image(systemName: icon(for: device))
-                                    .font(.largeTitle)
-                                Text("\(Int(sliderValue))%")
-                                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                            }
-                            .foregroundStyle(Color.black.opacity(0.78))
-                        }
-
-                        Slider(value: $sliderValue, in: 0 ... 100, step: 1) { editing in
-                            if !editing {
-                                Task {
-                                    await appState.setDevice(device, request: levelRequest(value: Int(sliderValue)))
-                                }
-                            }
-                        }
-                        .tint(VokrrTheme.lavender)
-                    }
-                    .padding(24)
-                    .glassCard(tint: VokrrTheme.lavender)
+                Text("VOKRR")
+                    .font(VokrrTheme.jost(26))
+                    .tracking(13)
+                    .padding(.leading, 13)
+                    .foregroundStyle(VokrrTheme.primaryText)
+                    .padding(.top, 34)
+                Text("GRAND TOURER SERIES")
+                    .font(VokrrTheme.mono(7.5))
+                    .tracking(4)
+                    .foregroundStyle(VokrrTheme.tertiaryText)
+                    .opacity(breathe ? 0.85 : 0.30)
+                    .padding(.top, 12)
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(VokrrTheme.champagne.opacity(0.15)).frame(width: 120, height: 1)
+                    Rectangle().fill(VokrrTheme.emerald).frame(width: progress ? 120 : 0, height: 1)
                 }
-
-                if device.supportsColorTemperature {
-                    HStack(spacing: 12) {
-                        temperatureButton(title: "Warm", kelvin: 2700, tint: VokrrTheme.coral)
-                        temperatureButton(title: "Neutral", kelvin: 4000, tint: VokrrTheme.lavender)
-                        temperatureButton(title: "Cool", kelvin: 6500, tint: VokrrTheme.sky)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Entity")
-                        .font(.headline)
-                    Text(device.entityID)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(VokrrTheme.secondaryText)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
-                .glassCard()
+                .padding(.top, 30)
             }
-            .padding(20)
         }
-        .presentationDetents([.medium, .large])
-        .background(VokrrTheme.background.ignoresSafeArea())
-    }
-
-    private func temperatureButton(title: String, kelvin: Int, tint: Color) -> some View {
-        Button {
+        .opacity(fading ? 0 : 1)
+        .onAppear {
+            guard !reduceMotion else {
+                progress = true
+                return
+            }
+            withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) { spinOuter = true }
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) { spinInner = true }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
+            withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { breathe = true }
+            withAnimation(.easeOut(duration: 2.4)) { progress = true }
             Task {
-                await appState.setDevice(device, request: DeviceSetRequest(colorTempKelvin: kelvin))
+                try? await Task.sleep(for: .milliseconds(2_340))
+                withAnimation(.easeOut(duration: 0.66)) { fading = true }
             }
-        } label: {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(tint)
-                    .frame(width: 10, height: 10)
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-            }
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity)
-            .glassCard(tint: tint)
         }
-        .buttonStyle(.plain)
-    }
-
-    private func levelRequest(value: Int) -> DeviceSetRequest {
-        if device.capabilities.contains(.brightness) {
-            return DeviceSetRequest(brightness: value)
-        }
-        return DeviceSetRequest(percentage: value)
-    }
-
-    private func icon(for device: Device) -> String {
-        switch device.type {
-        case .light: return "lightbulb.fill"
-        case .fan: return "fan.fill"
-        case .switch: return "switch.2"
-        case .sensor: return "sensor"
-        case .scene: return "sparkles"
-        case .unknown: return "switch.2"
-        }
+        .accessibilityHidden(true)
     }
 }

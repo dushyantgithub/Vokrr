@@ -94,6 +94,19 @@ final class APIClient {
         try await send(path: "/api/system/health", baseURL: baseURL, token: nil)
     }
 
+    func fetchHealthDashboard(baseURL: String, token: String, days: Int = 1) async throws -> HealthDashboardResponse {
+        try await send(path: "/api/health/dashboard?days=\(days)", baseURL: baseURL, token: token)
+    }
+
+    func refreshHealthDashboard(baseURL: String, token: String, days: Int = 1) async throws -> HealthDashboardResponse {
+        try await send(
+            path: "/api/health/refresh?days=\(days)",
+            baseURL: baseURL,
+            method: "POST",
+            token: token
+        )
+    }
+
     func fetchCurrentUser(baseURL: String, token: String) async throws -> SessionUser {
         try await send(path: "/api/auth/me", baseURL: baseURL, token: token)
     }
@@ -141,6 +154,20 @@ final class APIClient {
             baseURL: baseURL,
             method: "POST",
             token: token
+        )
+    }
+
+    func sendVoiceCommand(baseURL: String, token: String, text: String) async throws -> VoiceCommandPayload {
+        struct VoiceCommandRequest: Encodable {
+            let text: String
+        }
+
+        return try await send(
+            path: "/api/voice/command",
+            baseURL: baseURL,
+            method: "POST",
+            token: token,
+            body: VoiceCommandRequest(text: text)
         )
     }
 

@@ -5,26 +5,36 @@ final class KeychainClient {
     private let service = "Vokrr.iOS"
     private let tokenKey = "authSession"
 
+    private var accessGroup: String? {
+        Bundle.main.object(forInfoDictionaryKey: "VokrrKeychainAccessGroup") as? String
+    }
+
     func saveSession(_ session: AuthSession) {
         guard let data = try? JSONEncoder().encode(session) else { return }
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: tokenKey,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
-        SecItemDelete(query as CFDictionary)
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+        var deleteQuery = query
+        deleteQuery.removeValue(forKey: kSecValueData as String)
+        deleteQuery.removeValue(forKey: kSecAttrAccessible as String)
+        SecItemDelete(deleteQuery as CFDictionary)
         SecItemAdd(query as CFDictionary, nil)
     }
 
     func loadSession() -> AuthSession? {
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: tokenKey,
             kSecMatchLimit as String: kSecMatchLimitOne,
             kSecReturnData as String: true
         ]
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else {
@@ -46,11 +56,12 @@ final class KeychainClient {
     }
 
     func clearSession() {
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: tokenKey
         ]
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
         SecItemDelete(query as CFDictionary)
     }
 }

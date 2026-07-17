@@ -22,7 +22,7 @@ struct NewsView: View {
                 Spacer()
 
                 Button("Refresh") {
-                    appState.selectedTab = .news
+                    Task { await appState.refresh() }
                 }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(VokrrTheme.secondaryText)

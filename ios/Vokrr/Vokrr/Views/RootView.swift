@@ -2,82 +2,94 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showsNotifications = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showsSplash = !ProcessInfo.processInfo.arguments.contains("-VOKRRSkipSplash")
 
     var body: some View {
         ZStack {
-            AuroraBackground()
+            VokrrTheme.background.ignoresSafeArea()
 
             switch appState.phase {
             case .booting:
-                ProgressView()
-                    .tint(Color.white)
+                Color.clear
             case .login:
                 LoginView()
             case .ready:
-                content
+                readyContent
+            }
+
+            if showsSplash {
+                VokrrSplashView()
+                    .zIndex(100)
             }
         }
-        .sheet(isPresented: $showsNotifications) {
-            NotificationsSheet(notifications: appState.notifications)
-        }
+        .foregroundStyle(VokrrTheme.primaryText)
+        .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $appState.isDeviceOnboardingPresented) {
             DeviceOnboardingFlow()
                 .environmentObject(appState)
         }
-        .sheet(item: $appState.selectedDevice) { device in
-            DeviceDetailSheet(device: device)
-                .environmentObject(appState)
+        .task {
+            if reduceMotion {
+                try? await Task.sleep(for: .milliseconds(350))
+            } else {
+                try? await Task.sleep(for: .milliseconds(3_050))
+            }
+            showsSplash = false
+        }
+        .onOpenURL { url in
+            guard url.scheme == "vokrr" else { return }
+            switch url.host {
+            case "health": appState.selectedTab = .health
+            case "jarvis": appState.selectedTab = .jarvis
+            case "settings": appState.selectedTab = .settings
+            default: appState.selectedTab = .home
+            }
         }
     }
 
-    private var content: some View {
-        VStack(spacing: 18) {
-            JarvisBar(
-                status: appState.jarvisStatus,
-                message: appState.jarvisMessage,
-                health: appState.health,
-                unreadCount: appState.notifications.count,
-                onNotifications: { showsNotifications = true }
+    private var readyContent: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                switch appState.selectedTab {
+                case .home:
+                    DashboardView()
+                case .health:
+                    HealthView()
+                case .jarvis:
+                    JarvisView()
+                case .settings:
+                    SettingsView()
+                }
+            }
+            .id(appState.selectedTab)
+            .transition(
+                reduceMotion
+                    ? .opacity
+                    : .asymmetric(
+                        insertion: .opacity.combined(with: .offset(y: 16)),
+                        removal: .opacity
+                    )
             )
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
+            .animation(reduceMotion ? nil : VokrrTheme.entrance, value: appState.selectedTab)
+
+            VokrrTabBar(selectedTab: $appState.selectedTab)
+                .padding(.bottom, 12)
+                .zIndex(20)
 
             if !appState.networkMonitor.isReachable || !appState.bannerMessage.isEmpty {
-                Text(appState.networkMonitor.isReachable ? appState.bannerMessage : "No network connection")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Color.black)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.9))
-                    .clipShape(Capsule(style: .continuous))
-                    .padding(.horizontal, 20)
+                Text(appState.networkMonitor.isReachable ? appState.bannerMessage : "NO NETWORK CONNECTION")
+                    .font(VokrrTheme.mono(8, medium: true))
+                    .tracking(1.2)
+                    .foregroundStyle(VokrrTheme.background)
+                    .padding(.horizontal, 14)
+                    .frame(height: 30)
+                    .background(VokrrTheme.champagne, in: Capsule())
+                    .padding(.bottom, 94)
+                    .onTapGesture { appState.bannerMessage = "" }
+                    .zIndex(30)
             }
-
-            ScrollView(showsIndicators: false) {
-                Group {
-                    switch appState.selectedTab {
-                    case .dashboard:
-                        DashboardView()
-                    case .devices:
-                        DevicesView()
-                    case .routines:
-                        RoutinesView()
-                    case .activity:
-                        ActivityView()
-                    case .news:
-                        NewsView()
-                    case .settings:
-                        SettingsView()
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 120)
-            }
-
-            BottomTabBar(selectedTab: $appState.selectedTab)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
         }
+        .ignoresSafeArea(.keyboard)
     }
 }

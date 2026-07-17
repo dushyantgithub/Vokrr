@@ -1,11 +1,9 @@
 import Foundation
 
 enum VokrrTab: String, CaseIterable, Identifiable {
-    case dashboard = "Dashboard"
-    case devices = "Devices"
-    case routines = "Routines"
-    case activity = "Activity"
-    case news = "News"
+    case home = "Home"
+    case health = "Health"
+    case jarvis = "Jarvis"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -79,6 +77,18 @@ struct Device: Codable, Identifiable, Equatable {
     var supportsColorTemperature: Bool {
         capabilities.contains(.colorTemperature)
     }
+
+    var estimatedWatts: Int {
+        guard state.isOn else { return 0 }
+        let normalized = "\(name) \(entityID)".lowercased()
+        if normalized.contains("geyser") { return 2_000 }
+        if normalized.contains("aircon") || normalized.contains("ac ") { return 1_200 }
+        if normalized.contains("fan") { return 45 }
+        if normalized.contains("socket") { return 30 }
+        if normalized.contains("tube") { return 18 }
+        if normalized.contains("bulb") || type == .light { return 9 }
+        return type == .switch ? 12 : 0
+    }
 }
 
 struct Room: Codable, Identifiable, Equatable {
@@ -93,6 +103,10 @@ struct Room: Codable, Identifiable, Equatable {
 
     var canToggle: Bool {
         devices.contains { $0.capabilities.contains(.toggle) }
+    }
+
+    var estimatedWatts: Int {
+        devices.reduce(0) { $0 + $1.estimatedWatts }
     }
 }
 
@@ -304,6 +318,17 @@ struct VoiceCommandPayload: Codable {
         case matchedDeviceIDs = "matched_device_ids"
         case navigate
     }
+}
+
+struct JarvisChatMessage: Identifiable, Equatable {
+    enum Speaker: Equatable {
+        case user
+        case jarvis
+    }
+
+    let id = UUID()
+    let speaker: Speaker
+    let text: String
 }
 
 struct NotificationItem: Identifiable, Equatable {

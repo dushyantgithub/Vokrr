@@ -11,15 +11,23 @@ final class AppState: ObservableObject {
     @Published var rooms: [Room] = []
     @Published var scenes: [Routine] = []
     @Published var health: HealthResponse?
+    @Published var healthDashboard: HealthDashboardResponse?
+    @Published var isRefreshingHealth = false
     @Published var loginError = ""
     @Published var bannerMessage = ""
     @Published var settingsMessage = ""
     @Published var notifications: [NotificationItem] = []
-    @Published var selectedTab: VokrrTab = .dashboard
+    @Published var selectedTab: VokrrTab = .home
     @Published var selectedRoomID: String?
     @Published var selectedDevice: Device?
     @Published var jarvisStatus = "idle"
     @Published var jarvisMessage = "Say “Jarvis” to start"
+    @Published var jarvisChat: [JarvisChatMessage] = [
+        JarvisChatMessage(
+            speaker: .jarvis,
+            text: "Good evening. Home is steady — recovery and live device state are ready. What do you need?"
+        )
+    ]
     @Published var isRealtimeConnected = false
     @Published var isBusy = false
     @Published var isCreatingUser = false
@@ -37,7 +45,18 @@ final class AppState: ObservableObject {
     private let defaults = UserDefaults.standard
     private var session: AuthSession?
 
+    let isPreviewMode = ProcessInfo.processInfo.arguments.contains("-VOKRRPreviewMode")
+
     init() {
+        let launchArguments = ProcessInfo.processInfo.arguments
+        if isPreviewMode,
+           let tabArgumentIndex = launchArguments.firstIndex(of: "-VOKRRPreviewTab"),
+           launchArguments.indices.contains(tabArgumentIndex + 1),
+           let launchTab = VokrrTab.allCases.first(where: {
+               $0.rawValue.caseInsensitiveCompare(launchArguments[tabArgumentIndex + 1]) == .orderedSame
+           }) {
+            selectedTab = launchTab
+        }
         if let storedURL = defaults.string(forKey: "serverURL"), !storedURL.isEmpty {
             serverURL = storedURL
         }
@@ -54,7 +73,8 @@ final class AppState: ObservableObject {
     }
 
     var selectedRoom: Room? {
-        rooms.first(where: { $0.id == selectedRoomID }) ?? rooms.first
+        guard let selectedRoomID else { return nil }
+        return rooms.first(where: { $0.id == selectedRoomID })
     }
 
     var allDevices: [Device] {
@@ -62,11 +82,33 @@ final class AppState: ObservableObject {
     }
 
     var favoriteDevices: [Device] {
-        Array(allDevices.prefix(4))
+        Array(allDevices.prefix(8))
+    }
+
+    var liveWatts: Int {
+        allDevices.reduce(0) { $0 + $1.estimatedWatts }
+    }
+
+    var activeDevicesCount: Int {
+        allDevices.filter(\.state.isOn).count
+    }
+
+    var displayName: String {
+        let value = currentUser?.username ?? username
+        return value.prefix(1).uppercased() + value.dropFirst()
     }
 
     func bootstrap() async {
         if phase != .booting { return }
+        if isPreviewMode {
+            username = "Dushyant"
+            rooms = PreviewFixtures.rooms
+            healthDashboard = PreviewFixtures.health
+            health = HealthResponse(ok: true, homeAssistant: .init(ok: true, error: nil))
+            phase = .ready
+            saveWidgetSnapshot()
+            return
+        }
         if let stored = keychainClient.loadSession() {
             do {
                 session = stored
@@ -154,11 +196,20 @@ final class AppState: ObservableObject {
     }
 
     func toggleDevice(_ device: Device) async {
+        if isPreviewMode {
+            var updated = device
+            updated.state.isOn.toggle()
+            updated.state.state = updated.state.isOn ? "on" : "off"
+            mergeDevice(updated)
+            saveWidgetSnapshot()
+            return
+        }
         do {
             let updated = try await withAuthorizedAccessToken { token in
                 try await apiClient.toggleDevice(baseURL: serverURL, token: token, deviceID: device.id)
             }
             mergeDevice(updated)
+            saveWidgetSnapshot()
             pushNotification(
                 title: updated.name,
                 detail: updated.state.isOn ? "Turned on" : "Turned off",
@@ -170,6 +221,16 @@ final class AppState: ObservableObject {
     }
 
     func setDevice(_ device: Device, request: DeviceSetRequest) async {
+        if isPreviewMode {
+            var updated = device
+            if let state = request.state {
+                updated.state.isOn = state
+                updated.state.state = state ? "on" : "off"
+            }
+            mergeDevice(updated)
+            saveWidgetSnapshot()
+            return
+        }
         do {
             let updated = try await withAuthorizedAccessToken { token in
                 try await apiClient.setDevice(
@@ -180,12 +241,25 @@ final class AppState: ObservableObject {
                 )
             }
             mergeDevice(updated)
+            saveWidgetSnapshot()
         } catch {
             bannerMessage = error.localizedDescription
         }
     }
 
     func setRoomState(_ room: Room, isOn: Bool) async {
+        if isPreviewMode {
+            var updated = room
+            updated.devices = updated.devices.map { device in
+                var next = device
+                next.state.isOn = isOn
+                next.state.state = isOn ? "on" : "off"
+                return next
+            }
+            mergeRoom(updated)
+            saveWidgetSnapshot()
+            return
+        }
         do {
             let updated = try await withAuthorizedAccessToken { token in
                 try await apiClient.setRoomState(
@@ -196,6 +270,7 @@ final class AppState: ObservableObject {
                 )
             }
             mergeRoom(updated)
+            saveWidgetSnapshot()
             pushNotification(
                 title: room.name,
                 detail: isOn ? "Room powered on" : "Room powered off",
@@ -219,6 +294,7 @@ final class AppState: ObservableObject {
                     detail: isOn ? "Room powered on" : "Room powered off",
                     level: .info
                 )
+                saveWidgetSnapshot()
             } catch {
                 bannerMessage = error.localizedDescription
             }
@@ -241,6 +317,69 @@ final class AppState: ObservableObject {
         selectedRoomID = id
     }
 
+    func closeRoom() {
+        selectedRoomID = nil
+    }
+
+    func turnEverythingOff() async {
+        for room in rooms where room.activeDevicesCount > 0 {
+            await setRoomState(room, isOn: false)
+        }
+    }
+
+    func refreshHealthDashboard(force: Bool = false) async {
+        guard !isRefreshingHealth else { return }
+        if isPreviewMode {
+            healthDashboard = PreviewFixtures.health
+            return
+        }
+        isRefreshingHealth = true
+        defer { isRefreshingHealth = false }
+        do {
+            let dashboard = try await withAuthorizedAccessToken { token in
+                if force {
+                    return try await apiClient.refreshHealthDashboard(baseURL: serverURL, token: token)
+                }
+                return try await apiClient.fetchHealthDashboard(baseURL: serverURL, token: token)
+            }
+            healthDashboard = dashboard
+            saveWidgetSnapshot()
+        } catch {
+            bannerMessage = error.localizedDescription
+        }
+    }
+
+    func sendJarvisCommand(_ rawText: String) async {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, jarvisStatus != "processing" else { return }
+        jarvisChat.append(JarvisChatMessage(speaker: .user, text: text))
+        jarvisStatus = "processing"
+        jarvisMessage = "Thinking…"
+
+        if isPreviewMode {
+            try? await Task.sleep(for: .milliseconds(700))
+            let answer = previewJarvisReply(for: text)
+            jarvisChat.append(JarvisChatMessage(speaker: .jarvis, text: answer))
+            jarvisStatus = "done"
+            jarvisMessage = answer
+            return
+        }
+
+        do {
+            let response = try await withAuthorizedAccessToken { token in
+                try await apiClient.sendVoiceCommand(baseURL: serverURL, token: token, text: text)
+            }
+            jarvisChat.append(JarvisChatMessage(speaker: .jarvis, text: response.message))
+            jarvisStatus = response.understood ? "done" : "command_error"
+            jarvisMessage = response.message
+            try? await loadInitialData()
+        } catch {
+            jarvisStatus = "command_error"
+            jarvisMessage = error.localizedDescription
+            jarvisChat.append(JarvisChatMessage(speaker: .jarvis, text: error.localizedDescription))
+        }
+    }
+
     private func loadInitialData() async throws {
         async let nextHealth = apiClient.fetchHealth(baseURL: serverURL)
         async let nextUser = withAuthorizedAccessToken { token in
@@ -258,9 +397,13 @@ final class AppState: ObservableObject {
         rooms = try await nextRooms
         scenes = try await nextScenes
         syncSessionUser(user)
-        if selectedRoomID == nil {
-            selectedRoomID = rooms.first?.id
+        selectedRoomID = nil
+        if user.isAdmin {
+            healthDashboard = try? await withAuthorizedAccessToken { token in
+                try await apiClient.fetchHealthDashboard(baseURL: serverURL, token: token)
+            }
         }
+        saveWidgetSnapshot()
     }
 
     private func connectRealtime() async {
@@ -336,6 +479,7 @@ final class AppState: ObservableObject {
         session = nil
         rooms = []
         scenes = []
+        healthDashboard = nil
         selectedRoomID = nil
         notifications = []
         settingsMessage = ""
@@ -448,11 +592,12 @@ final class AppState: ObservableObject {
         case "snapshot":
             if let wrapped = try? decoder.decode(SnapshotPayload.self, from: payload) {
                 rooms = wrapped.rooms
-                selectedRoomID = selectedRoomID ?? wrapped.rooms.first?.id
+                saveWidgetSnapshot()
             }
         case "device.updated":
             if let updated = try? decoder.decode(Device.self, from: payload) {
                 mergeDevice(updated)
+                saveWidgetSnapshot()
             }
         case "voice.status":
             if let status = try? decoder.decode(VoiceStatusPayload.self, from: payload) {
@@ -495,6 +640,30 @@ final class AppState: ObservableObject {
 
     private func mergeRoom(_ updatedRoom: Room) {
         rooms = rooms.map { $0.id == updatedRoom.id ? updatedRoom : $0 }
+    }
+
+    private func saveWidgetSnapshot() {
+        SharedWidgetStore.save(rooms: rooms, health: healthDashboard, serverURL: serverURL)
+    }
+
+    private func previewJarvisReply(for command: String) -> String {
+        let normalized = command.lowercased()
+        if normalized.contains("sleep") {
+            return "7h 12m, score 86. Deep sleep is up and recovery is optimal."
+        }
+        if normalized.contains("glucose") {
+            return "Glucose is 94 mg/dL and currently in target."
+        }
+        if normalized.contains("gaming") && normalized.contains("off") {
+            if let room = rooms.first(where: { $0.name.lowercased().contains("gaming") }) {
+                Task { await setRoomState(room, isOn: false) }
+            }
+            return "Gaming room powered down."
+        }
+        if normalized.contains("warm") || normalized.contains("bedroom") {
+            return "Bedroom climate request sent. It should be comfortable shortly."
+        }
+        return "Done. Anything else?"
     }
 
     private func pushNotification(title: String, detail: String, level: NotificationLevel) {
